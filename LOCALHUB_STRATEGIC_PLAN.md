@@ -14,35 +14,48 @@ LocalHub is a restaurant/vendor marketplace discovery platform designed to demon
 ### What Gets Built
 
 **Two Parallel Versions**:
-1. **Traditional Version**: SSR with client-side lazy-loading (current best practices)
-   - Static shell rendered on server
-   - Dynamic content lazy-loaded by client
-   - Expected Web Vitals: LCP ~750ms, CLS ~0.25, PageSpeed ~42
+1. **Traditional Version**: SSR with optimized lazy-loading (current best practices)
+   - Static parts (restaurant info, images) fully SSRed with initial paint
+   - Dynamic parts (status, wait time, specials) lazy-loaded by client
+   - Spinners shown during SSR, replaced when data arrives
+   - Expected Web Vitals: LCP ~500-600ms, CLS ~0.10-0.15, PageSpeed ~48-52
 
 2. **Modern Version**: RSC with streaming (React 19 + Rails integration)
-   - Complete data fetched server-side in parallel
-   - HTML streamed to browser with all data
-   - Expected Web Vitals: LCP ~200ms, CLS ~0.02, PageSpeed ~92
+   - All data fetched server-side in parallel (before rendering)
+   - Complete page with Suspense boundaries rendered by RSC
+   - HTML streamed to browser as async components resolve
+   - Expected Web Vitals: LCP ~200-250ms, CLS ~0.02, PageSpeed ~90-94
 
 **Comparison Interface**: Side-by-side demo showing metrics, network waterfall, performance differences
 
 ### Code Sharing Strategy
 
 ```
-Shared (100%):         Database, Models, Styling, Base Components
-Shared (70-80%):       Routes structure, API endpoints, Performance monitoring
-Version-Specific:      Data fetching (2 completely different approaches)
-Completely Different:  Component rendering logic
+Shared (100%):         Database, Models, Styling, Display Components
+Shared (95%):          Async Component Structure (lazy vs async, same flow)
+Shared (100%):         Routes, API endpoints, Types, Performance monitoring
+Version-Specific:      Data fetching mechanism (fetch/useState vs getReactOnRailsAsyncProp)
+                       Webpack configuration (code-splitting vs RSC loader)
 ```
+
+**Code Reuse Breakdown**:
+- Display components: 100% (StatusBadge, WaitTimeBadge, SpecialsList, etc.)
+- Static content: 100% (RestaurantCard static parts)
+- Async component structure: 95% (differ only in data source)
+- Database layer: 100% (models, queries, migrations)
+- Styling: 100% (Tailwind, design tokens)
+- Tests: 100% (Jest, RSpec)
+- **Total code reuse: ~82-85% of codebase**
 
 **Implementation Order** ensures that shared code is written once and reused:
 1. Foundation (database, models) → used by both versions
-2. UI components and styling → used by both versions
+2. Display components and styling → used by both versions
 3. Routes and API structure → used by both versions
 4. Performance monitoring infrastructure → used by both versions
-5. Traditional version implementation → uses all above
-6. Modern version implementation → uses all above except data fetching
-7. Comparison interface → showcases metrics from both
+5. Async component structure → ~95% shared, differ only in data fetching
+6. Traditional version (lazy-loaded) → implements useEffect/fetch for async parts
+7. RSC version (async server components) → implements getReactOnRailsAsyncProp for async parts
+8. Comparison interface → showcases metrics from both
 
 ---
 
@@ -101,7 +114,7 @@ Testing:
 
 ### Architecture Overview
 
-Both versions share the same conceptual architecture, differing only in data fetching:
+Both versions share the same conceptual architecture, differing only in **where data is fetched** and **how components load data**:
 
 ```
 Request arrives at Rails router
@@ -110,22 +123,29 @@ Controller action handles request
   ↓
 [DIVERGENCE POINT]
   ├─ Traditional Version:
-  │   ├─ Render static shell (100% SSR HTML, no data)
-  │   ├─ Return HTML + JS bundle
-  │   └─ Browser loads data via API endpoints (lazy-loading)
+  │   ├─ SSR: Render static parts + spinners for dynamic parts
+  │   ├─ Return HTML + JS bundles (code-split for lazy chunks)
+  │   ├─ Browser: React hydrates, lazy components mount
+  │   ├─ Lazy components: useEffect → fetch API → replace spinners
+  │   └─ Dynamic data loads AFTER hydration (client-side fetch)
   │
-  └─ Modern Version (RSC):
-      ├─ Fetch all data in parallel (server-side)
-      ├─ Render RSC components with data
-      ├─ Stream HTML chunks to browser
-      └─ Browser receives complete page
+  └─ RSC Version:
+      ├─ Server: Fetch all data in parallel (before rendering)
+      ├─ Server: Render RSC with Suspense boundaries + spinners
+      ├─ Server: Stream HTML chunks to browser
+      ├─ Async components: use getReactOnRailsAsyncProp to fetch data
+      ├─ Browser: Streams fill in as async data arrives
+      └─ Dynamic data loads server-side (before HTML response)
 ```
 
 **Why This Architecture Maximizes Sharing**:
-- Same API endpoints used by both (traditional via XMLHttpRequest, modern via RSC server functions)
-- Same database queries (both versions run identical SQL)
-- Same UI components (rendered differently, but same structure)
-- Same styling and design
+- Same API endpoints (traditional fetches client-side, RSC can fetch server-side)
+- Same database queries (both versions run identical SQL for same data)
+- Same display components (StatusBadge, WaitTimeBadge, etc. - purely presentational)
+- Same styling and design system
+- Same async component wrapper structure (lazy() in traditional, async function in RSC)
+- Same Suspense boundary strategy (spinners during loading)
+- Same props shape passed to components
 
 ---
 
@@ -190,6 +210,135 @@ Without realistic volumes:
 - Query would take 5ms (too fast, no visible advantage)
 - RSC + streaming wouldn't show clear benefit
 - Demo would look artificial
+
+---
+
+## Part 3.5: Component Architecture - Lazy-Loaded vs Async Server Components
+
+### The Key Difference: How Components Load Data
+
+Both versions use **Suspense boundaries with spinners**, but the mechanism differs:
+
+#### Traditional Version: Lazy-Loaded Components
+
+```typescript
+// Dynamic parts converted to lazy-loaded chunks
+const AsyncStatus = lazy(() => import('./AsyncStatus'));
+const AsyncWaitTime = lazy(() => import('./AsyncWaitTime'));
+
+// Container - renders static parts + lazy components
+function RestaurantCard({ restaurant }) {
+  return (
+    <div>
+      {/* Static parts - rendered immediately */}
+      <h3>{restaurant.name}</h3>
+      <img src={restaurant.imageUrl} />
+
+      {/* Dynamic parts - lazy-loaded on client */}
+      <Suspense fallback={<Spinner />}>
+        <AsyncStatus restaurantId={restaurant.id} />
+      </Suspense>
+
+      <Suspense fallback={<Spinner />}>
+        <AsyncWaitTime restaurantId={restaurant.id} />
+      </Suspense>
+    </div>
+  );
+}
+
+// Lazy component - mounts AFTER hydration, fetches data
+function AsyncStatus({ restaurantId }) {
+  const [status, setStatus] = useState(null);
+
+  useEffect(() => {
+    // Fetch runs AFTER component mounts (lazy chunk loaded)
+    fetch(`/api/restaurants/${restaurantId}/status`)
+      .then(r => r.json())
+      .then(setStatus);
+  }, [restaurantId]);
+
+  return status ? <StatusBadge status={status} /> : null;
+}
+```
+
+**Timeline**:
+1. SSR: Render static parts + spinners (10-20ms)
+2. Browser: Receive HTML with static content visible
+3. Browser: Download JS bundles (50ms)
+4. Browser: Hydrate React (50ms)
+5. Browser: Lazy components mount → fetch API (100-150ms)
+6. Server: Query database (wait time is bottleneck, 100-150ms)
+7. Browser: Spinner replaced with content
+- **Total to full content: ~400-500ms**
+
+#### RSC Version: Async Server Components
+
+```typescript
+// Dynamic parts are async server components
+async function AsyncStatus({ restaurantId }) {
+  // getReactOnRailsAsyncProp is provided by react_on_rails
+  // Fetches data on SERVER, not client
+  const status = await getReactOnRailsAsyncProp('status', { restaurantId });
+  return <StatusBadge status={status} />;
+}
+
+async function AsyncWaitTime({ restaurantId }) {
+  const waitTime = await getReactOnRailsAsyncProp('waitTime', { restaurantId });
+  return waitTime ? <WaitTimeBadge time={waitTime} /> : null;
+}
+
+// Container - structure is identical to traditional!
+async function RestaurantCard({ restaurant }) {
+  return (
+    <div>
+      {/* Static parts */}
+      <h3>{restaurant.name}</h3>
+      <img src={restaurant.imageUrl} />
+
+      {/* Dynamic parts - async server components */}
+      <Suspense fallback={<Spinner />}>
+        <AsyncStatus restaurantId={restaurant.id} />
+      </Suspense>
+
+      <Suspense fallback={<Spinner />}>
+        <AsyncWaitTime restaurantId={restaurant.id} />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+**Timeline**:
+1. Server: Begin parallel data fetching (0ms)
+2. Server: Query databases in parallel (~150-200ms total)
+3. Server: Render RSC with Suspense boundaries
+4. Server: Stream HTML chunks to browser
+5. Browser: Receive static content + spinners immediately (~50ms)
+6. Browser: Async component results stream in (~200-250ms)
+7. Browser: Spinners replaced as data arrives
+- **Total to full content: ~200-250ms**
+
+### Code Sharing: Component Structure
+
+**The containers (RestaurantCard) look identical!**
+
+```typescript
+// Both versions have almost identical structure:
+<div>
+  <StaticContent />
+  <Suspense><AsyncStatus /></Suspense>
+  <Suspense><AsyncWaitTime /></Suspense>
+</div>
+```
+
+**The only differences**:
+- Traditional: Uses `lazy()` wrapper, `useState`, `useEffect`, `fetch()`
+- RSC: Uses `async function`, `getReactOnRailsAsyncProp`
+
+**Display components are 100% identical:**
+- `<StatusBadge status={status} />` - same in both versions
+- `<WaitTimeBadge time={waitTime} />` - same in both versions
+- Props shape is identical
 
 ---
 
@@ -1119,40 +1268,74 @@ PHASE 8: POLISH & DOCUMENTATION (Uses everything)
 
 ## Code Reuse Summary
 
-### 100% Shared
-- ✅ Database schema and migrations
-- ✅ Rails models and query methods
-- ✅ API endpoints and controllers
-- ✅ Database seed script
-- ✅ Route structure
-- ✅ React component structure (RestaurantCard, etc.)
-- ✅ Tailwind styling
-- ✅ Performance metrics collection
-- ✅ RSpec tests for models and APIs
-- ✅ Jest tests for components
+### 100% Identical Between Versions
 
-### ~70% Shared
-- ✅ React component templates (same JSX structure, different data sources)
-- ✅ View files (same layout, different rendering approach)
+| Component | Reuse | Details |
+|-----------|-------|---------|
+| Database schema & migrations | 100% | All 8 tables, indexes identical |
+| Rails models & methods | 100% | Restaurant, Order, Review, etc. |
+| API endpoints & controllers | 100% | Shared by both versions |
+| Database seed script | 100% | 53M records for both |
+| Route structure | 100% | Same routes, different views |
+| Display components | 100% | StatusBadge, WaitTimeBadge, etc. |
+| Static content components | 100% | RestaurantCardStatic only |
+| Tailwind styling | 100% | Same CSS classes, design tokens |
+| Performance metrics | 100% | Web Vitals collection shared |
+| Types & interfaces | 100% | All prop interfaces identical |
+| RSpec model tests | 100% | Same tests validate both |
+| RSpec API tests | 100% | Same API endpoints used |
+| Jest component tests | 100% | Same display components tested |
 
-### 0% Shared (Version-Specific)
-- ❌ Data fetching approach (API calls vs server-side in RSC)
-- ❌ Component hydration strategy (useState/useEffect vs RSC)
-- ❌ Streaming implementation (Server-Sent Events vs Transfer-Encoding)
+**Total 100% Shared: ~55-60% of codebase**
+
+### ~95% Similar (Structure Identical, Data Source Differs)
+
+| Component | Similarity | How They Differ |
+|-----------|-----------|---|
+| Container components (RestaurantCard) | 95% | Traditional: lazy() wrapper; RSC: async function |
+| Suspense boundaries | 95% | Both use Suspense, fallback spinners identical |
+| Async component structure | 95% | Both fetch then render, different mechanism |
+| View templates | 90% | Same layout, different JSX rendering |
+
+**Total ~95% Similar: ~20-25% of codebase**
+
+### 0% Shared (Fundamentally Different)
+
+| Component | Usage | Reason |
+|-----------|-------|--------|
+| Lazy-loaded components (Traditional) | Traditional only | Uses `lazy()`, code-splitting, `useEffect`, `fetch()` |
+| Async server components (RSC) | RSC only | Uses `async function`, `getReactOnRailsAsyncProp` |
+| Webpack traditional config | Traditional only | Code-splitting for lazy chunks |
+| Webpack RSC config | RSC only | RSC loader + plugin for server/client bundling |
+| Data fetching approach | Version-specific | Client-side `fetch()` vs server-side `getReactOnRailsAsyncProp` |
+
+**Total 0% Shared: ~15-20% of codebase**
+
+### Overall Code Reuse: **82-85%**
+
+**Breakdown**:
+- 60% - 100% identical (database, models, API, display components)
+- 25% - 95% similar (async components, containers, views)
+- 15% - 0% shared (data fetching mechanism, webpack configs)
 
 ### Effort Reduction
-By following this structure:
-- **70% of code is reused** between versions
-- **No duplicate business logic** (queries live in models once)
-- **Identical tests** validate shared code
-- **Single API layer** serves both versions
-- **Traditional takes ~5-6 days** (React lazy-loading UI)
-- **Modern takes ~3-4 days** (RSC adaptation)
-- **Total without sharing: ~12-14 days**
-- **Total with sharing: ~10-11 days** (only 1-2 days saved? NO!)
-- **Shared foundation saves: ~3-4 days** (no duplicate setup)
-- **Single test suite saves: ~1-2 days** (tests once, verify both)
-- **Total actual effort: ~6-7 days** for both versions complete
+
+By following this architecture:
+- **All business logic written once** (in models)
+- **All database queries written once** (same methods called by both)
+- **All styling written once** (Tailwind, applied to both)
+- **All tests written once** (validate shared code)
+- **Display components created once** (used by both)
+- **API endpoints created once** (both use same routes)
+
+**Timeline**:
+- Traditional version: ~5-6 days (lazy-load components + webpack config)
+- RSC version: ~3-4 days (async components + RSC config)
+- **Total without sharing: ~10-14 days**
+- **Shared foundation (Phases 1-4): ~5-6 days**
+- **Version implementations (Phases 5-6, parallel): ~5-6 days**
+- **Total with sharing: ~10-12 days** (but 5-6 days can be parallel)
+- **Critical path: ~5-6 days** (Phases 1-4 sequential, then 5-6 in parallel)
 
 ---
 
@@ -1194,25 +1377,46 @@ Restaurant.first.current_wait_time  # Must show ~100-150ms query time
 
 ## Success Metrics
 
-**Traditional Version Should Show**:
-- LCP: 700-800ms
-- CLS: 0.20-0.30
-- PageSpeed: 40-45
-- Bundle: 95 KB
-- Time to First Interaction: 600ms+
+**Traditional Version (Optimized: SSR Static + Lazy Dynamic)**:
 
-**Modern Version Should Show**:
-- LCP: 150-250ms
-- CLS: < 0.05
-- PageSpeed: 90-95
-- Bundle: 25 KB
-- Time to First Interaction: 200ms
+| Metric | Target | Notes |
+|--------|--------|-------|
+| LCP | 500-600ms | SSR static parts visible, spinners shown |
+| CLS | 0.10-0.15 | Small layout shift when spinners replaced |
+| INP | 80-100ms | Fetch + update latency |
+| TTI | 400-500ms | Interactive after hydration |
+| JS Bundle | 35-40 KB | Code-split lazy chunks |
+| First Paint | ~50ms | SSR content immediately visible |
+| Lazy Load Time | 200-250ms | API fetch + render |
+
+**Modern Version (RSC + Streaming)**:
+
+| Metric | Target | Notes |
+|--------|--------|-------|
+| LCP | 200-250ms | Streamed complete page arrives |
+| CLS | 0.02 | No layout shifts (no spinners to replace) |
+| INP | 50-60ms | Hydrated with data, instant interaction |
+| TTI | 200-250ms | Components ready with data |
+| JS Bundle | 25-30 KB | Pure client component JS |
+| First Paint | ~250ms | Streamed HTML with all content |
+| Server Fetch | ~150-200ms | Parallel database queries |
 
 **Improvement**:
-- LCP improvement: ~70%
-- CLS improvement: ~80%
-- PageSpeed improvement: ~110%
-- Bundle reduction: ~74%
+
+| Metric | Traditional | RSC | Improvement |
+|--------|-------------|-----|------------|
+| LCP | 550ms | 225ms | **59% faster** |
+| CLS | 0.12 | 0.02 | **83% less shift** |
+| INP | 90ms | 55ms | **39% faster** |
+| TTI | 450ms | 225ms | **50% faster** |
+| JS Bundle | 37 KB | 27 KB | **27% smaller** |
+| Overall Speed | Good (48-52) | Excellent (90-94) | **85% improvement** |
+
+**Why These Numbers Are Realistic**:
+- Traditional number reflects honest SSR + lazy-load optimization (not artificial)
+- RSC advantage comes from eliminating client-side fetch round-trip (100-150ms saved)
+- Database query latency (150-200ms) is real and unavoidable, but server-side parallelization helps
+- CLS difference is dramatic because RSC doesn't have lazy-load spinners
 
 ---
 
@@ -1227,52 +1431,116 @@ localhub-demo/
 │       └── performance.yml
 ├── app/
 │   ├── controllers/
-│   │   ├── restaurants_controller.rb      [SHARED base, versions differ in action body]
+│   │   ├── restaurants_controller.rb      [SHARED base, actions differ slightly]
 │   │   └── api/
-│   │       ├── restaurants_controller.rb  [SHARED]
-│   │       └── metrics_controller.rb      [SHARED]
+│   │       ├── restaurants_controller.rb  [SHARED - used by traditional]
+│   │       └── metrics_controller.rb      [SHARED - metrics collection]
+│   │
 │   ├── models/
-│   │   ├── restaurant.rb                  [SHARED]
-│   │   ├── order.rb                       [SHARED]
-│   │   ├── review.rb                      [SHARED]
-│   │   └── ...
+│   │   ├── restaurant.rb                  [100% SHARED]
+│   │   ├── order.rb                       [100% SHARED]
+│   │   ├── review.rb                      [100% SHARED]
+│   │   ├── hour.rb                        [100% SHARED]
+│   │   ├── special_hour.rb                [100% SHARED]
+│   │   ├── menu_item.rb                   [100% SHARED]
+│   │   ├── promotion.rb                   [100% SHARED]
+│   │   └── order_line.rb                  [100% SHARED]
+│   │
 │   ├── views/
 │   │   ├── restaurants/
-│   │   │   ├── search.html.erb            [TRADITIONAL - lazy-load shell]
-│   │   │   └── search_modern.html.erb     [MODERN - RSC]
+│   │   │   ├── search.html.erb            [TRADITIONAL - SSR static + lazy dynamic]
+│   │   │   └── search_rsc.html.erb        [RSC - SSR + streaming]
 │   │   └── layouts/
-│   │       └── application.html.erb       [SHARED]
+│   │       └── application.html.erb       [100% SHARED]
+│   │
 │   └── javascript/
 │       ├── components/
-│       │   ├── RestaurantCard.tsx         [SHARED UI component]
-│       │   ├── TraditionalSearch.tsx      [TRADITIONAL only - lazy-load logic]
-│       │   ├── ModernSearch.tsx           [MODERN only - RSC]
-│       │   └── ComparisonDashboard.tsx    [SHARED - comparison UI]
+│       │   │
+│       │   ├── Display Components (100% SHARED):
+│       │   │   ├── StatusBadge.tsx        [Display only - no logic]
+│       │   │   ├── WaitTimeBadge.tsx      [Display only - no logic]
+│       │   │   ├── SpecialsList.tsx       [Display only - no logic]
+│       │   │   ├── ReviewRating.tsx       [Display only - no logic]
+│       │   │   └── RestaurantCardStatic.tsx [Static parts only]
+│       │   │
+│       │   ├── Container Components (~95% SHARED):
+│       │   │   ├── RestaurantCard.tsx     [Traditional - lazy-load async parts]
+│       │   │   └── RestaurantCard.rsc.tsx [RSC - render async parts]
+│       │   │
+│       │   ├── async/
+│       │   │   ├── traditional/           [TRADITIONAL only]
+│       │   │   │   ├── AsyncStatus.tsx         [lazy() + useState + useEffect]
+│       │   │   │   ├── AsyncWaitTime.tsx      [lazy() + useState + useEffect]
+│       │   │   │   ├── AsyncSpecials.tsx      [lazy() + useState + useEffect]
+│       │   │   │   ├── AsyncStatus.lazy.tsx   [Code-split lazy chunk]
+│       │   │   │   ├── AsyncWaitTime.lazy.tsx [Code-split lazy chunk]
+│       │   │   │   └── AsyncSpecials.lazy.tsx [Code-split lazy chunk]
+│       │   │   │
+│       │   │   └── rsc/                   [RSC only]
+│       │   │       ├── AsyncStatus.tsx         [async function + getReactOnRailsAsyncProp]
+│       │   │       ├── AsyncWaitTime.tsx      [async function + getReactOnRailsAsyncProp]
+│       │   │       └── AsyncSpecials.tsx      [async function + getReactOnRailsAsyncProp]
+│       │   │
+│       │   ├── ComparisonDashboard.tsx    [100% SHARED - comparison UI]
+│       │   └── types/
+│       │       └── index.ts               [100% SHARED - all prop interfaces]
+│       │
 │       └── utils/
-│           ├── performanceMetrics.ts      [SHARED]
-│           └── api.ts                     [SHARED]
+│           ├── performanceMetrics.ts      [100% SHARED - metrics collection]
+│           ├── api.ts                     [For traditional version]
+│           └── constants.ts               [100% SHARED]
+│
+├── config/
+│   ├── webpack/
+│   │   ├── webpack.config.js              [TRADITIONAL - with lazy() code-splitting]
+│   │   ├── webpack.rsc.js                 [RSC - with RSC loader + plugin]
+│   │   └── webpack.common.js              [Shared base config]
+│   │
+│   ├── initializers/
+│   │   └── react_on_rails.rb              [With RSC support enabled]
+│   │
+│   └── routes.rb                          [100% SHARED]
+│
 ├── db/
 │   ├── migrate/
-│   │   ├── 001_create_restaurants.rb      [SHARED]
-│   │   ├── 002_create_orders.rb           [SHARED]
-│   │   └── ...
-│   └── seeds.rb                           [SHARED]
+│   │   ├── 001_create_restaurants.rb      [100% SHARED]
+│   │   ├── 002_create_hours.rb            [100% SHARED]
+│   │   ├── 003_create_special_hours.rb    [100% SHARED]
+│   │   ├── 004_create_reviews.rb          [100% SHARED]
+│   │   ├── 005_create_menu_items.rb       [100% SHARED]
+│   │   ├── 006_create_orders.rb           [100% SHARED]
+│   │   ├── 007_create_order_lines.rb      [100% SHARED]
+│   │   ├── 008_create_promotions.rb       [100% SHARED]
+│   │   └── 009_add_indexes.rb             [100% SHARED - critical for query perf]
+│   │
+│   └── seeds.rb                           [100% SHARED - realistic 53M records]
+│
 ├── spec/
 │   ├── models/
-│   │   ├── restaurant_spec.rb             [SHARED - tests model methods]
-│   │   └── order_spec.rb                  [SHARED]
-│   └── requests/
-│       └── api/restaurants_spec.rb        [SHARED - tests API endpoints]
-├── package.json                           [SHARED]
-├── tsconfig.json                          [SHARED]
-└── tailwind.config.js                     [SHARED]
+│   │   ├── restaurant_spec.rb             [100% SHARED]
+│   │   ├── order_spec.rb                  [100% SHARED]
+│   │   └── review_spec.rb                 [100% SHARED]
+│   │
+│   ├── requests/
+│   │   └── api/restaurants_spec.rb        [100% SHARED - tests API endpoints]
+│   │
+│   └── components/
+│       ├── StatusBadge.spec.tsx           [100% SHARED - tests display component]
+│       ├── WaitTimeBadge.spec.tsx         [100% SHARED]
+│       └── RestaurantCard.spec.tsx        [Tests both traditional and RSC versions]
+│
+├── package.json                           [100% SHARED - different build scripts]
+├── tsconfig.json                          [100% SHARED]
+├── tailwind.config.js                     [100% SHARED]
+└── .rubocop.yml                           [100% SHARED]
 ```
 
-**Legend**:
-- `[SHARED]` - Same file used by both versions
-- `[TRADITIONAL only]` - Only traditional version
-- `[MODERN only]` - Only modern version
-- `[SHARED base, versions differ]` - Same file but different logic per version
+**Color-Coded Legend**:
+- `[100% SHARED]` - Identical file used by both versions
+- `[~95% SHARED]` - Same structure, minimal differences
+- `[TRADITIONAL only]` - Only traditional version uses
+- `[RSC only]` - Only RSC version uses
+- `[SHARED base]` - Base file with minimal version-specific logic
 
 ---
 
