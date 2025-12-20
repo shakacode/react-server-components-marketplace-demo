@@ -3,7 +3,7 @@
 import ReactOnRails from 'react-on-rails-pro';
 
 // Components
-import HelloWorld from '../components/HelloWorld.jsx';
+import HelloWorld from '../components/HelloWorld';
 
 // Register components with React on Rails
 ReactOnRails.register({
