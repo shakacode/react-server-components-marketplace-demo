@@ -85,16 +85,16 @@ Examples: StatusBadge, WaitTimeBadge, RatingBadge, SpecialsList, TrendingItems
 
 **Both versions use the same RSC webpack config.** The difference is which bundle renders the page:
 
-**Traditional Version** (uses server bundle):
+**Traditional Version** (uses client bundle with SSR):
 ```typescript
 // SearchPage.tsx - Root component with "use client"
-"use client";  // ← Add this at the root level
+"use client";  // ← Makes this and ALL imported components into client components
 
 import React, { Suspense, lazy } from 'react';
 import RestaurantCardHeader from '../restaurant/RestaurantCardHeader';
 import Spinner from '../shared/Spinner';
 
-// Code-split async components
+// Lazy-loaded components - these are NOT SSRed, only their fallbacks are
 const AsyncStatus = lazy(() => import('../async/traditional/AsyncStatus'));
 const AsyncWaitTime = lazy(() => import('../async/traditional/AsyncWaitTime'));
 const AsyncSpecials = lazy(() => import('../async/traditional/AsyncSpecials'));
@@ -106,10 +106,10 @@ export default function SearchPage({ restaurantId }: Props) {
     <div className="container mx-auto p-4">
       <h1 className="text-3xl font-bold mb-6">Restaurant Details</h1>
 
-      {/* Static content - fully SSRed */}
+      {/* Static content - SSRed */}
       <RestaurantCardHeader restaurantId={restaurantId} />
 
-      {/* Dynamic content - lazy-loaded into separate chunks */}
+      {/* Lazy-loaded content - NOT SSRed, only spinners render on server */}
       <div className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
           <Suspense fallback={<Spinner label="Checking status..." />}>
@@ -127,7 +127,7 @@ export default function SearchPage({ restaurantId }: Props) {
   );
 }
 
-// AsyncStatus.tsx - Lazy-loaded async component
+// AsyncStatus.tsx - Lazy-loaded component (NOT SSRed)
 export default function AsyncStatus({ restaurantId }: Props) {
   const [status, setStatus] = useState(null);
   useEffect(() => {
@@ -138,17 +138,16 @@ export default function AsyncStatus({ restaurantId }: Props) {
   return status ? <StatusBadge status={status} /> : null;
 }
 ```
-- ✅ `"use client"` at root level (everything underneath is in server bundle)
-- ✅ All components still SSRed (rendered to HTML on server)
-- ✅ Static content (RestaurantCardHeader) fully SSRed as pure HTML
+- ✅ `"use client"` at root level → all components become client components
+- ✅ Components go into client bundle (NOT RSC bundle)
+- ✅ Static parts SSRed, but lazy-loaded components are NOT SSRed (only fallbacks render)
 - ✅ Async components lazy-loaded (separate chunks, imported via `lazy()`)
-- ✅ Uses server bundle (not RSC bundle)
 - ✅ Data fetches client-side (useEffect/fetch) → 500-600ms LCP
 
 **RSC Version** (uses RSC bundle):
 ```typescript
 // SearchPage.tsx - Async server component (no "use client")
-// No "use client" = goes into RSC bundle
+// No "use client" = server component, goes into RSC bundle
 async function SearchPage({ restaurantId }: Props) {
   // Data fetches SERVER-SIDE before rendering
   const status = await getReactOnRailsAsyncProp('status', { restaurantId });
@@ -157,15 +156,16 @@ async function SearchPage({ restaurantId }: Props) {
   return <StatusBadge status={status} />;
 }
 ```
+- ✅ Server component (no "use client") → goes into RSC bundle
 - ✅ SSRed via RSC pipeline (streamed as Suspense resolves)
-- ✅ No "use client" directive (excluded from server bundle, included in RSC bundle)
-- ✅ Async function (server-side only pattern)
-- ✅ Uses RSC bundle
+- ✅ Entire page is SSRed (both server and client components)
+- ✅ Async function can await data server-side
+- ✅ Client components can exist lower in tree with "use client" directive
 - ✅ Data fetches server-side → 200-250ms LCP
 
 **Key difference**:
-- **Traditional**: "use client" at root level → all components in server bundle → lazy-load async chunks → client-side fetch
-- **RSC**: No "use client" (async function) → components in RSC bundle → stream complete with all data → no lazy-loading needed
+- **Traditional**: "use client" at root → all components become client components → go into client bundle → lazy-loaded components NOT SSRed → client-side data fetch
+- **RSC**: No "use client" at root (server components) → go into RSC bundle → entire page SSRed → client components allowed lower in tree → server-side data fetch
 
 ## Web Vitals Targets
 
@@ -315,8 +315,8 @@ See Task 5 for full walkthrough script.
 **Q: Why 10M orders?**
 A: Creates natural 100-150ms query latency. Without it, demo fails.
 
-**Q: Why two webpack configs?**
-A: RSC requires RSC loader and three-bundle strategy that traditional version doesn't need.
+**Q: Why the same webpack config for both versions?**
+A: Both use the RSC webpack config which produces three bundles (client, server, RSC). Traditional version uses the client bundle, RSC version uses the RSC bundle.
 
 **Q: Can I modify query latency?**
 A: No—that defeats the demo's purpose.
