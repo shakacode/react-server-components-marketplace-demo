@@ -1,0 +1,56 @@
+{
+  "name": "localhub-demo",
+  "private": true,
+  "packageManager": "pnpm@9.15.2",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "bin/shakapacker",
+    "build:dev": "bin/shakapacker --mode development",
+    "build:production": "NODE_ENV=production bin/shakapacker --mode production",
+    "dev": "bin/shakapacker-dev-server",
+    "lint": "eslint app/javascript --ext .js,.jsx,.ts,.tsx",
+    "lint:fix": "eslint app/javascript --ext .js,.jsx,.ts,.tsx --fix",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hotwired/stimulus": "^3.2.2",
+    "@hotwired/turbo-rails": "^8.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-on-rails-pro": "16.2.0-beta.20",
+    "react-on-rails-rsc": "19.0.3",
+    "web-vitals": "^4.2.0"
+  },
+  "devDependencies": {
+    "@pmmmwh/react-refresh-webpack-plugin": "^0.5.15",
+    "react-refresh": "^0.14.0",
+    "@babel/core": "^7.24.0",
+    "@babel/preset-env": "^7.24.0",
+    "@babel/preset-react": "^7.24.0",
+    "@babel/preset-typescript": "^7.24.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "autoprefixer": "^10.4.0",
+    "babel-loader": "^9.1.0",
+    "css-loader": "^6.10.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.34.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "mini-css-extract-plugin": "^2.8.0",
+    "postcss": "^8.4.0",
+    "postcss-loader": "^8.1.0",
+    "sass": "^1.71.0",
+    "sass-loader": "^14.1.0",
+    "shakapacker": "^8.0.0",
+    "style-loader": "^3.3.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.4.0",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.0",
+    "webpack-dev-server": "^5.0.0"
+  }
+}
