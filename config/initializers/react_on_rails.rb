@@ -8,7 +8,7 @@ ReactOnRails.configure do |config|
   config.build_production_command = 'RAILS_ENV=production NODE_ENV=production bin/shakapacker'
 
   # This is the directory where your server bundle is generated
-  config.server_bundle_js_file = 'ssr-generated/server-bundle.js'
+  config.server_bundle_js_file = 'server-bundle.js'
 
   # Disable auto_load_bundle for now - we'll manually register components
   # Set to true later when using file-system based automated bundle generation

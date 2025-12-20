@@ -9,9 +9,13 @@ ReactOnRailsPro.configure do |config|
 
   # Use Node renderer for server-side rendering
   config.server_renderer = 'NodeRenderer'
+  config.renderer_use_fallback_exec_js = false
 
   # Renderer URL for the Node.js server
   config.renderer_url = ENV.fetch('RENDERER_URL', 'http://localhost:3800')
+
+  # Password for node renderer authentication (must match node-renderer.js)
+  config.renderer_password = ENV.fetch('RENDERER_PASSWORD', 'development_password')
 
   # RSC payload generation URL path
   config.rsc_payload_generation_url_path = 'rsc_payload/'

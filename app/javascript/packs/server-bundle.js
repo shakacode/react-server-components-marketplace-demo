@@ -2,10 +2,13 @@
 // This file is used for server-side rendering and RSC
 import ReactOnRails from 'react-on-rails-pro';
 
-// Components will be registered here as they are created
-// Example:
-// import RestaurantCard from '../components/RestaurantCard';
-// ReactOnRails.register({ RestaurantCard });
+// Components
+import HelloWorld from '../components/HelloWorld.jsx';
+
+// Register components with React on Rails
+ReactOnRails.register({
+  HelloWorld,
+});
 
 // Make React available globally for testing
 if (process.env.NODE_ENV === 'test') {

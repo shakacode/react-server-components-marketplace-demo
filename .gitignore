@@ -38,6 +38,9 @@ node_modules/
 # SSR generated bundles
 /ssr-generated/
 
+# Node renderer bundles cache
+/.node-renderer-bundles/
+
 # Shakapacker cache
 /tmp/shakapacker
 

@@ -2,13 +2,13 @@
 // This file is loaded in the browser and registers client-side components
 import ReactOnRails from 'react-on-rails-pro';
 
-// Import global styles
-// import '../styles/application.css';
+// Components
+import HelloWorld from '../components/HelloWorld.jsx';
 
-// Components will be registered here as they are created
-// Example:
-// import RestaurantCard from '../components/RestaurantCard';
-// ReactOnRails.register({ RestaurantCard });
+// Register components with React on Rails
+ReactOnRails.register({
+  HelloWorld,
+});
 
 ReactOnRails.setOptions({
   traceTurbolinks: false,
