@@ -9,6 +9,9 @@ default: &default
   cache_path: tmp/shakapacker
   webpack_compile_output: true
 
+  # Required for auto bundling - enables nested entry point generation
+  nested_entries: true
+
   # Additional paths webpack should look up modules
   additional_paths: []
 

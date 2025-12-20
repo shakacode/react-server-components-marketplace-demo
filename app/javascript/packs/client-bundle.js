@@ -3,8 +3,8 @@
 import ReactOnRails from 'react-on-rails-pro';
 import registerServerComponent from 'react-on-rails-pro/registerServerComponent/client';
 
-// Components
-import HelloWorld from '../components/HelloWorld';
+// Components - import from startup directory for auto-bundling compatibility
+import HelloWorld from '../startup/HelloWorld';
 
 // Register components with React on Rails
 ReactOnRails.register({

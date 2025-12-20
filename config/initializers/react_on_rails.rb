@@ -10,7 +10,9 @@ ReactOnRails.configure do |config|
   # This is the directory where your server bundle is generated
   config.server_bundle_js_file = 'server-bundle.js'
 
-  # Disable auto_load_bundle for now - we'll manually register components
-  # Set to true later when using file-system based automated bundle generation
-  config.auto_load_bundle = false
+  # Enable auto bundling - file-system based automated bundle generation
+  config.auto_load_bundle = true
+
+  # Directory name where components are discovered for auto bundling
+  config.components_subdirectory = 'startup'
 end
