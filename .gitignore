@@ -1,0 +1,99 @@
+# React on Rails Pro license
+config/react_on_rails_pro_license.key
+
+# Ignore bundler config.
+/.bundle
+
+# Ignore all logfiles and tempfiles.
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+
+# Ignore pidfiles, but keep the directory.
+/tmp/pids/*
+!/tmp/pids/
+!/tmp/pids/.keep
+
+# Ignore storage (for Active Storage, Disk Db)
+/storage/*
+!/storage/.keep
+
+# Ignore master key for production (Rails credentials)
+/config/master.key
+/config/credentials/*.key
+
+# Ignore uploaded files in development.
+/storage/*
+!/storage/.keep
+/public/uploads
+
+# Node modules
+node_modules/
+
+# Webpack / Shakapacker build output
+/public/packs
+/public/packs-test
+
+# SSR generated bundles
+/ssr-generated/
+
+# Auto-bundling generated packs
+/app/javascript/packs/generated/
+/app/javascript/generated/
+
+# Node renderer bundles cache
+/.node-renderer-bundles/
+
+# Shakapacker cache
+/tmp/shakapacker
+
+# Yarn / PNPM
+.yarn-integrity
+.pnpm-debug.log
+pnpm-lock.yaml.backup
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+/coverage/
+
+# Byebug history
+.byebug_history
+
+# Spring (Rails app preloader)
+/tmp/spring/
+spring/*.pid
+
+# Bootsnap cache
+tmp/cache/bootsnap*
+
+# Ruby version managers
+.ruby-version
+.ruby-gemset
+.rvmrc
+
+# SQLite databases (if used)
+*.sqlite3
+*.sqlite3-*
+
+# Redis dump
+dump.rdb

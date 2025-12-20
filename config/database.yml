@@ -1,0 +1,18 @@
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+
+development:
+  <<: *default
+  database: localhub_demo_development
+
+test:
+  <<: *default
+  database: localhub_demo_test
+
+production:
+  <<: *default
+  database: localhub_demo_production
+  username: localhub_demo
+  password: <%= ENV['LOCALHUB_DEMO_DATABASE_PASSWORD'] %>

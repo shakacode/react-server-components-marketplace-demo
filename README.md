@@ -30,26 +30,30 @@ See `IMPLEMENTATION_TASKS.md` for detailed specifications.
 |------|------|------|
 | 1. Setup & Database | 8-12h | Rails app, PostgreSQL, seed 62M records |
 | 2. Shared Components & API | 12-16h | Display components, 5 API endpoints |
-| 3. Traditional Version | 10-14h | Webpack code-splitting, lazy components |
-| 4. RSC Version | 10-14h | RSC loader, async components, streaming |
+| 3. Traditional Version | 10-14h | "use client" boundary, `react_component` helper |
+| 4. RSC Version | 10-14h | Async server components, `stream_react_component` helper |
 | 5. Dashboard & Docs | 6-10h | Metrics, demo walkthrough, deployment |
+
+**Note**: Tasks 3 & 4 share the same webpack config (RSC-based). Only the component patterns and Rails helpers differ.
 
 **Critical Path**: Task 1 (blocks everything) → Task 2 (blocks both versions) → Tasks 3&4 (parallel) → Task 5
 
 ## Architecture Decisions
 
-### 1. One Database, Two Webpack Configs
+### 1. One Database, One Webpack Config (RSC-based)
 
 **Shared** (82-85% code reuse):
 - Same PostgreSQL database (50K restaurants, 10M orders)
 - Same Rails models & API endpoints
 - Same display components (StatusBadge, WaitTimeBadge, etc.)
 - Same Tailwind styling
+- **Same webpack config** (RSC-based, produces 3 bundles: client, server, RSC)
 
 **Different**:
-- Webpack config (traditional: code-splitting, RSC: RSC loader)
-- Data fetching (client fetch vs getReactOnRailsAsyncProp)
-- View templates
+- Which bundle renders the page (server bundle vs RSC bundle)
+- Data fetching timing (client-side vs server-side)
+- Rails helpers (`react_component` vs `stream_react_component`)
+- Root component pattern ("use client" for traditional vs async function for RSC)
 
 ### 2. Realistic Query Latency is Essential
 
@@ -79,38 +83,89 @@ Examples: StatusBadge, WaitTimeBadge, RatingBadge, SpecialsList, TrendingItems
 
 ### Data Fetching Patterns
 
-**Traditional Version**:
+**Both versions use the same RSC webpack config.** The difference is which bundle renders the page:
+
+**Traditional Version** (uses server bundle):
 ```typescript
-// AsyncStatus wrapper (parent)
-const AsyncStatusLazy = lazy(() => import('./AsyncStatus.lazy'));
-export function AsyncStatus({ restaurantId }: Props) {
+// SearchPage.tsx - Root component with "use client"
+"use client";  // ← Add this at the root level
+
+import React, { Suspense, lazy } from 'react';
+import RestaurantCardHeader from '../restaurant/RestaurantCardHeader';
+import Spinner from '../shared/Spinner';
+
+// Code-split async components
+const AsyncStatus = lazy(() => import('../async/traditional/AsyncStatus'));
+const AsyncWaitTime = lazy(() => import('../async/traditional/AsyncWaitTime'));
+const AsyncSpecials = lazy(() => import('../async/traditional/AsyncSpecials'));
+const AsyncTrending = lazy(() => import('../async/traditional/AsyncTrending'));
+const AsyncRating = lazy(() => import('../async/traditional/AsyncRating'));
+
+export default function SearchPage({ restaurantId }: Props) {
   return (
-    <Suspense fallback={<Spinner />}>
-      <AsyncStatusLazy restaurantId={restaurantId} />
-    </Suspense>
+    <div className="container mx-auto p-4">
+      <h1 className="text-3xl font-bold mb-6">Restaurant Details</h1>
+
+      {/* Static content - fully SSRed */}
+      <RestaurantCardHeader restaurantId={restaurantId} />
+
+      {/* Dynamic content - lazy-loaded into separate chunks */}
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 gap-4">
+          <Suspense fallback={<Spinner label="Checking status..." />}>
+            <AsyncStatus restaurantId={restaurantId} />
+          </Suspense>
+
+          <Suspense fallback={<Spinner label="Getting wait time..." />}>
+            <AsyncWaitTime restaurantId={restaurantId} />
+          </Suspense>
+
+          {/* ... more async components */}
+        </div>
+      </div>
+    </div>
   );
 }
 
-// AsyncStatus.lazy.tsx (separate chunk)
-function AsyncStatusComponent({ restaurantId }: Props) {
+// AsyncStatus.tsx - Lazy-loaded async component
+export default function AsyncStatus({ restaurantId }: Props) {
   const [status, setStatus] = useState(null);
   useEffect(() => {
-    fetch(`/api/restaurants/${restaurantId}/status`).then(setStatus);
+    fetch(`/api/restaurants/${restaurantId}/status`)
+      .then(res => res.json())
+      .then(setStatus);
   }, [restaurantId]);
-  return <StatusBadge status={status} />;
+  return status ? <StatusBadge status={status} /> : null;
 }
 ```
+- ✅ `"use client"` at root level (everything underneath is in server bundle)
+- ✅ All components still SSRed (rendered to HTML on server)
+- ✅ Static content (RestaurantCardHeader) fully SSRed as pure HTML
+- ✅ Async components lazy-loaded (separate chunks, imported via `lazy()`)
+- ✅ Uses server bundle (not RSC bundle)
+- ✅ Data fetches client-side (useEffect/fetch) → 500-600ms LCP
 
-**RSC Version**:
+**RSC Version** (uses RSC bundle):
 ```typescript
-// Server component (async function, no hooks allowed)
-async function AsyncStatus({ restaurantId }: Props) {
+// SearchPage.tsx - Async server component (no "use client")
+// No "use client" = goes into RSC bundle
+async function SearchPage({ restaurantId }: Props) {
+  // Data fetches SERVER-SIDE before rendering
   const status = await getReactOnRailsAsyncProp('status', { restaurantId });
+
+  // Component renders with data already resolved
   return <StatusBadge status={status} />;
 }
 ```
+- ✅ SSRed via RSC pipeline (streamed as Suspense resolves)
+- ✅ No "use client" directive (excluded from server bundle, included in RSC bundle)
+- ✅ Async function (server-side only pattern)
+- ✅ Uses RSC bundle
+- ✅ Data fetches server-side → 200-250ms LCP
 
-Key difference: Traditional fetches client-side, RSC fetches server-side.
+**Key difference**:
+- **Traditional**: "use client" at root level → all components in server bundle → lazy-load async chunks → client-side fetch
+- **RSC**: No "use client" (async function) → components in RSC bundle → stream complete with all data → no lazy-loading needed
 
 ## Web Vitals Targets
 

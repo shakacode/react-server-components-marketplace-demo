@@ -113,36 +113,46 @@ restaurants (50K)
 
 ## Task 3: Traditional Version (10-14 hours)
 
-**Goal**: SSR + lazy-loading implementation
+**Goal**: Traditional React SSR with client-side data fetching, using server bundle
+
+**Important**: Task 3 & 4 share the same webpack config created in Task 1. The difference:
+- Task 3: "use client" at root → all components in server bundle → lazy-load async chunks → client-side fetch
+- Task 4: No "use client" (async function) → components in RSC bundle → server-side fetch
+
+**Key Pattern**: Put `"use client"` at root level. Everything underneath is in the server bundle (traditional React).
 
 ### Deliverables
 
-**Webpack Configuration**:
-- Code-splitting for lazy() components
-- Entry point: `app/javascript/entries/search.tsx`
-- Output: `app/assets/webpack/traditional/`
+**Rails View** (`search.html.erb`):
+```erb
+<div class="search-page">
+  <%= react_component("SearchPage", { restaurant_id: @restaurant.id }) %>
+</div>
+```
 
-**Lazy-Loaded Components**:
-- `AsyncStatus` + `AsyncStatus.lazy.tsx` (separate chunk)
-- `AsyncWaitTime` + `AsyncWaitTime.lazy.tsx` (separate chunk)
-- `AsyncSpecials` + `AsyncSpecials.lazy.tsx` (separate chunk)
-- `AsyncTrending` + `AsyncTrending.lazy.tsx` (separate chunk)
-- `AsyncRating` + `AsyncRating.lazy.tsx` (separate chunk)
+**Page Component** (`SearchPage.tsx`):
+- Parent component (no "use client")
+- SSRed by `react_component` helper
+- Returns SearchPageContent as child
+
+**Client-Side Components** ("use client" boundary):
+- `SearchPageContent` with "use client" directive
+- `AsyncStatus` component with useState + useEffect
+- `AsyncWaitTime` component with useState + useEffect
+- `AsyncSpecials` component with useState + useEffect
+- `AsyncTrending` component with useState + useEffect
+- `AsyncRating` component with useState + useEffect
 
 **Pattern**:
 ```typescript
-// Wrapper (with Suspense)
-const AsyncStatusLazy = lazy(() => import('./AsyncStatus.lazy'));
-export function AsyncStatus({ restaurantId }: Props) {
-  return (
-    <Suspense fallback={<Spinner />}>
-      <AsyncStatusLazy restaurantId={restaurantId} />
-    </Suspense>
-  );
+// SearchPage.tsx - SSRed by react_component
+export default function SearchPage({ restaurant_id }: Props) {
+  return <SearchPageContent restaurantId={restaurant_id} />;
 }
 
-// Lazy component (in separate chunk)
-function AsyncStatusComponent({ restaurantId }: Props) {
+// SearchPageContent.tsx - Forces client-side via "use client"
+"use client";
+export function SearchPageContent({ restaurantId }: Props) {
   const [status, setStatus] = useState(null);
   useEffect(() => {
     fetch(`/api/restaurants/${restaurantId}/status`)
@@ -179,9 +189,8 @@ function AsyncStatusComponent({ restaurantId }: Props) {
 
 ### Key Files
 
-- `config/webpack/webpack.config.js`
 - `app/javascript/entries/search.tsx`
-- `app/javascript/components/async/traditional/` (10 files)
+- `app/javascript/components/async/traditional/` (6 files: SearchPage + 5 async components)
 - `app/views/restaurants/search.html.erb`
 - `app/javascript/utils/performance/vitals.ts`
 
@@ -197,15 +206,19 @@ function AsyncStatusComponent({ restaurantId }: Props) {
 
 **Goal**: Server Components + streaming implementation
 
+**Important**: Task 3 & 4 share the same webpack config created in Task 1. This task focuses on component patterns only.
+
 ### Deliverables
 
-**Webpack Configuration**:
-- RSC loader for server components
-- RSC webpack plugin for three bundles (RSC payload, server, client)
-- Entry point: `app/javascript/entries/search_rsc.tsx`
-- Output: `app/assets/webpack/rsc/`
+**Rails View** (`search_rsc.html.erb`):
+```erb
+<div class="search-page">
+  <%= stream_react_component("SearchPageRSC", { restaurant_id: @restaurant.id }) %>
+</div>
+```
 
 **Async Server Components**:
+- `SearchPageRSC.tsx` (async function, server component)
 - `AsyncStatus.tsx` (async function, server component)
 - `AsyncWaitTime.tsx` (async function, server component)
 - `AsyncSpecials.tsx` (async function, server component)
@@ -214,22 +227,26 @@ function AsyncStatusComponent({ restaurantId }: Props) {
 
 **Pattern**:
 ```typescript
-// Server component (async, no hooks)
+// SearchPageRSC.tsx - Async server component
+async function SearchPageRSC({ restaurant_id }: Props) {
+  return (
+    <div>
+      <RestaurantCardHeader restaurantId={restaurant_id} />
+      <Suspense fallback={<Spinner />}>
+        <AsyncStatus restaurantId={restaurant_id} />
+      </Suspense>
+      {/* etc */}
+    </div>
+  );
+}
+export default SearchPageRSC;
+
+// AsyncStatus.tsx - Server component (async, no hooks)
 async function AsyncStatus({ restaurantId }: Props) {
   const status = await getReactOnRailsAsyncProp('status', { restaurantId });
   return <StatusBadge status={status} />;
 }
 export default AsyncStatus;
-```
-
-**View Template**:
-```erb
-<!-- app/views/restaurants/search_rsc.html.erb -->
-<RestaurantCardHeader restaurant={<%= restaurant.to_json %>} />
-<Suspense fallback={<Spinner />}>
-  <AsyncStatus restaurantId={<%= restaurant.id %>} />
-</Suspense>
-<!-- etc -->
 ```
 
 **Performance Monitoring**:
@@ -249,11 +266,10 @@ export default AsyncStatus;
 
 ### Key Files
 
-- `config/webpack/webpack.rsc.js`
 - `app/javascript/entries/search_rsc.tsx`
-- `app/javascript/components/async/rsc/` (5 files)
+- `app/javascript/components/async/rsc/` (6 files: SearchPageRSC + 5 async components)
 - `app/views/restaurants/search_rsc.html.erb`
-- `config/initializers/react_on_rails.rb` (RSC enabled)
+- `config/initializers/react_on_rails.rb` (RSC already enabled in Task 1)
 
 ### Notes
 
