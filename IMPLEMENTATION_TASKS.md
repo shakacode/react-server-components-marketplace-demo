@@ -113,9 +113,13 @@ restaurants (50K)
 
 ## Task 3: Traditional Version (10-14 hours)
 
-**Goal**: SSR + client-side fetching using "use client" boundary
+**Goal**: Traditional React SSR with client-side data fetching, using server bundle
 
-**Important**: Task 3 & 4 share the same webpack config created in Task 1. This task focuses on component patterns only.
+**Important**: Task 3 & 4 share the same webpack config created in Task 1. The difference:
+- Task 3: "use client" at root → all components in server bundle → lazy-load async chunks → client-side fetch
+- Task 4: No "use client" (async function) → components in RSC bundle → server-side fetch
+
+**Key Pattern**: Put `"use client"` at root level. Everything underneath is in the server bundle (traditional React).
 
 ### Deliverables
 

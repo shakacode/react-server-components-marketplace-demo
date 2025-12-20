@@ -10,12 +10,17 @@
 
 Build the React Server Components (RSC) + streaming version. This demonstrates how RSC dramatically improves Web Vitals by fetching all data server-side before rendering.
 
-**Key Principle**: All components are async functions that fetch data using `getReactOnRailsAsyncProp` (provided by react-on-rails-pro), then render pure display components.
+**Key Principle**: Root component is an async function WITHOUT `"use client"` directive, which tells webpack:
+- ✅ Put this in the RSC bundle (not server bundle)
+- ✅ SSRed via RSC pipeline (server-side async rendering)
+- ✅ Streamed to browser as Suspense boundaries resolve
+- ✅ All data fetched server-side via getReactOnRailsAsyncProp
+- ❌ No `"use client"` directive (uses RSC, not traditional SSR)
 
 **Pattern**:
-1. Root component (SearchPageRSC) is async server component
+1. Root component is async function (no `"use client"`)
 2. All nested async components await data before rendering
-3. No "use client" boundaries (server-side only)
+3. Data fetched server-side via getReactOnRailsAsyncProp
 4. No useState or useEffect (React hooks forbidden in server components)
 5. `stream_react_component` helper streams HTML as Suspense boundaries resolve
 6. Browser receives complete HTML with no client-side fetch waterfall
@@ -44,6 +49,9 @@ export default SearchPageRSC;
 Create `app/javascript/components/search/SearchPageRSC.tsx`:
 
 ```typescript
+// No "use client" directive!
+// This means: put in RSC bundle (server components), not server bundle (traditional SSR)
+
 import React, { Suspense } from 'react';
 import AsyncStatus from '../async/rsc/AsyncStatus';
 import AsyncWaitTime from '../async/rsc/AsyncWaitTime';
@@ -56,7 +64,8 @@ interface Props {
   restaurant_id: number;
 }
 
-// This is an async server component
+// This is an async server component (RSC)
+// No "use client" = goes in RSC bundle
 async function SearchPageRSC({ restaurant_id }: Props) {
   return (
     <div className="container mx-auto p-4">
@@ -65,7 +74,7 @@ async function SearchPageRSC({ restaurant_id }: Props) {
       {/* Static content */}
       <RestaurantCardHeader restaurantId={restaurant_id} />
 
-      {/* Dynamic content - all data fetched server-side */}
+      {/* Dynamic content - all data fetched SERVER-SIDE */}
       <div className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
           <Suspense fallback={<Spinner label="Checking status..." />}>
@@ -96,7 +105,10 @@ async function SearchPageRSC({ restaurant_id }: Props) {
 export default SearchPageRSC;
 ```
 
-**Key difference from Task 3**: No "use client" directive, component is async function.
+**Key difference from Task 3**:
+- ❌ No "use client" directive
+- ✅ Async function (server component pattern)
+- ✅ Put in RSC bundle (not server bundle)
 
 ---
 

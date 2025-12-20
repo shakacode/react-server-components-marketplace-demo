@@ -8,16 +8,24 @@
 
 ## Overview
 
-Build the traditional SSR + client-side fetching version. This demonstrates current best practice: SSR the page, then client components handle data fetching.
+Build the traditional React SSR with client-side data fetching version.
 
-**Key Principle**: Use "use client" boundary to force components to be client-side, similar to how `lazy()` works but using React 19's native approach.
+**Key Principle**: Use `"use client"` at the root level to put the entire page in the server bundle (traditional React).
+
+- ✅ Root component: `"use client"` directive at the top
+- ✅ All components underneath: automatically in server bundle (traditional React with hooks)
+- ✅ Static content: fully SSRed on server, visible immediately
+- ✅ Async components: lazy() code-split into separate chunks
+- ✅ Data fetches: client-side via useEffect/fetch (after hydration)
 
 **Pattern**:
-1. Parent component (SearchPage) SSRed by `react_component` helper
-2. Child component (SearchPageContent) marked with "use client" directive
-3. Child component contains async components with useState + useEffect
-4. Data fetched client-side via fetch API
-5. Spinners show while loading, replaced when data arrives
+1. Root component has `"use client"` directive
+2. All components inherit server bundle context
+3. Use lazy() to code-split async components
+4. Each async component (lazy-loaded) has useState + useEffect for data fetching
+5. useEffect sends API requests when component mounts
+6. Spinners replaced with content when data arrives
+7. **Result**: 500-600ms LCP with lazy-loaded chunks
 
 **Expected Performance**: LCP ~500-600ms, CLS ~0.10-0.15
 
@@ -38,13 +46,23 @@ export default SearchPage;
 
 ---
 
-### 2. Parent Component (SSRed)
+### 2. Root Component (with "use client")
 
 Create `app/javascript/components/search/SearchPage.tsx`:
 
 ```typescript
-import React from 'react';
-import SearchPageContent from './SearchPageContent';
+"use client";  // ← Add this at the root level
+
+import React, { Suspense, lazy } from 'react';
+import RestaurantCardHeader from '../restaurant/RestaurantCardHeader';
+import Spinner from '../shared/Spinner';
+
+// Code-split async components into separate chunks
+const AsyncStatus = lazy(() => import('../async/traditional/AsyncStatus'));
+const AsyncWaitTime = lazy(() => import('../async/traditional/AsyncWaitTime'));
+const AsyncSpecials = lazy(() => import('../async/traditional/AsyncSpecials'));
+const AsyncTrending = lazy(() => import('../async/traditional/AsyncTrending'));
+const AsyncRating = lazy(() => import('../async/traditional/AsyncRating'));
 
 interface Props {
   restaurant_id: number;
@@ -54,77 +72,50 @@ export default function SearchPage({ restaurant_id }: Props) {
   return (
     <div className="container mx-auto p-4">
       <h1 className="text-3xl font-bold mb-6">Restaurant Details</h1>
-      <SearchPageContent restaurantId={restaurant_id} />
-    </div>
-  );
-}
-```
 
-This component will be SSRed by the Rails `react_component` helper.
+      {/* Static content - fully SSRed on server */}
+      <RestaurantCardHeader restaurantId={restaurant_id} />
 
----
+      {/* Dynamic content - lazy-loaded into separate chunks */}
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 gap-4">
+          <Suspense fallback={<Spinner label="Checking status..." />}>
+            <AsyncStatus restaurantId={restaurant_id} />
+          </Suspense>
 
-### 3. Client-Side Components ("use client")
+          <Suspense fallback={<Spinner label="Getting wait time..." />}>
+            <AsyncWaitTime restaurantId={restaurant_id} />
+          </Suspense>
 
-Create `app/javascript/components/search/SearchPageContent.tsx`:
+          <Suspense fallback={<Spinner label="Loading specials..." />}>
+            <AsyncSpecials restaurantId={restaurant_id} />
+          </Suspense>
 
-```typescript
-"use client";
+          <Suspense fallback={<Spinner label="Finding trending items..." />}>
+            <AsyncTrending restaurantId={restaurant_id} />
+          </Suspense>
 
-import React, { Suspense } from 'react';
-import AsyncStatus from '../async/traditional/AsyncStatus';
-import AsyncWaitTime from '../async/traditional/AsyncWaitTime';
-import AsyncSpecials from '../async/traditional/AsyncSpecials';
-import AsyncTrending from '../async/traditional/AsyncTrending';
-import AsyncRating from '../async/traditional/AsyncRating';
-import Spinner from '../shared/Spinner';
-
-interface Props {
-  restaurantId: number;
-}
-
-export default function SearchPageContent({ restaurantId }: Props) {
-  return (
-    <div className="space-y-6">
-      {/* Static content */}
-      <RestaurantCardHeader restaurantId={restaurantId} />
-
-      {/* Dynamic content with fallback spinners */}
-      <div className="grid grid-cols-2 gap-4">
-        <Suspense fallback={<Spinner label="Checking status..." />}>
-          <AsyncStatus restaurantId={restaurantId} />
-        </Suspense>
-
-        <Suspense fallback={<Spinner label="Getting wait time..." />}>
-          <AsyncWaitTime restaurantId={restaurantId} />
-        </Suspense>
-
-        <Suspense fallback={<Spinner label="Loading specials..." />}>
-          <AsyncSpecials restaurantId={restaurantId} />
-        </Suspense>
-
-        <Suspense fallback={<Spinner label="Finding trending items..." />}>
-          <AsyncTrending restaurantId={restaurantId} />
-        </Suspense>
-
-        <Suspense fallback={<Spinner label="Fetching ratings..." />}>
-          <AsyncRating restaurantId={restaurantId} />
-        </Suspense>
+          <Suspense fallback={<Spinner label="Fetching ratings..." />}>
+            <AsyncRating restaurantId={restaurant_id} />
+          </Suspense>
+        </div>
       </div>
     </div>
   );
 }
 ```
 
+**Key**: `"use client"` at root level puts everything in the server bundle (traditional React). All components still SSR, but lazy-loaded async components are code-split into separate chunks.
+
 ---
 
-### 4. Async Components (client-side fetch)
+### 3. Lazy-Loaded Async Components (Code-Split)
+
+Create individual async components in separate files. The `lazy()` imports in SearchPage.tsx (from section 2) code-split each component into its own chunk.
 
 Create `app/javascript/components/async/traditional/AsyncStatus.tsx`:
 
 ```typescript
-"use client";
-
 import React, { useState, useEffect } from 'react';
 import StatusBadge from '../../restaurant/StatusBadge';
 
@@ -144,6 +135,7 @@ export default function AsyncStatus({ restaurantId }: Props) {
   useEffect(() => {
     const controller = new AbortController();
 
+    // Data fetches on CLIENT-SIDE
     fetch(`/api/restaurants/${restaurantId}/status`, {
       signal: controller.signal,
     })
@@ -168,14 +160,17 @@ export default function AsyncStatus({ restaurantId }: Props) {
 ```
 
 Create similar async components:
-- `AsyncWaitTime.tsx` - Fetches `/api/restaurants/:id/wait_time`
+- `AsyncWaitTime.tsx` - Fetches `/api/restaurants/:id/wait_time` (100-150ms)
 - `AsyncSpecials.tsx` - Fetches `/api/restaurants/:id/specials`
 - `AsyncTrending.tsx` - Fetches `/api/restaurants/:id/trending`
 - `AsyncRating.tsx` - Fetches `/api/restaurants/:id/rating`
 
+**Key**: Each async component is in its own file and imported via `lazy()` → separate chunk in webpack bundle.
+Only async parts are code-split, static parts are fully SSRed as HTML.
+
 ---
 
-### 5. Rails View
+### 4. Rails View
 
 Create `app/views/restaurants/search.html.erb`:
 
@@ -215,7 +210,7 @@ Create `app/views/restaurants/search.html.erb`:
 
 ---
 
-### 6. Routes Configuration
+### 5. Routes Configuration
 
 Add to `config/routes.rb`:
 
@@ -230,7 +225,7 @@ get '/api/restaurants/:id/rating', to: 'api/restaurants#rating'
 
 ---
 
-### 7. Rails Controller
+### 6. Rails Controller
 
 Create `app/controllers/restaurants_controller.rb`:
 
@@ -247,84 +242,93 @@ end
 ## Success Criteria
 
 - [ ] `/search` page loads and renders
-- [ ] Parent (SearchPage) SSRs on server
-- [ ] Child (SearchPageContent) marked "use client"
-- [ ] Spinners visible initially
+- [ ] Static content visible immediately (SSRed)
+- [ ] Spinners visible initially (placeholders)
 - [ ] All 5 async components load (separate API calls)
-- [ ] Spinners replaced with content when ready
-- [ ] Web Vitals collected and posted to `/api/performance_metrics`
-- [ ] Web Vitals measured: LCP ~500-600ms, CLS ~0.10-0.15
+- [ ] Spinners replaced with content when data arrives
+- [ ] Web Vitals collected: LCP ~500-600ms, CLS ~0.10-0.15
+- [ ] Network waterfall shows sequential API calls (fetch waterfall)
 - [ ] Console shows no errors
 
 ---
 
 ## Key Technical Details
 
-### "use client" vs lazy()
+### What "use client" Does
 
-**Traditional approach (not used here)**:
-```typescript
-const AsyncStatusLazy = lazy(() => import('./AsyncStatus.lazy'));
+`"use client"` is often misnamed—it doesn't mean "client-only":
+- ✅ Component is still SSR'd (rendered to HTML on server)
+- ✅ Component is still hydrated (interactive on client)
+- ❌ Component is NOT in RSC bundle (excluded from server components)
+- ✅ Component IS in server bundle (traditional SSR bundle)
+
+**Result**: Traditional React SSR pattern (not RSC).
+
+### Why This Feels Slow
+
+```
+Timeline:
+0-50ms:   SSRed HTML received (spinners visible)
+50-100ms: JS bundles download
+100-150ms: React hydrates
+150-200ms: Async components mount, useEffect fires
+200-350ms: API requests in flight (~100-150ms wait_time query)
+350-500ms: Responses received, spinners replaced with content
+500-600ms: All content visible (LCP)
 ```
 
-**New approach (Task 3 uses this)**:
+Each async component fetches sequentially on client → waterfall effect.
+
+### Suspense + fallback Pattern
+
 ```typescript
-"use client";
-// Component is client-side JavaScript
+<Suspense fallback={<Spinner />}>
+  <AsyncStatus restaurantId={restaurantId} />
+</Suspense>
 ```
 
-Both achieve the same goal: force component to be client-side. The "use client" directive is React 19's native approach.
-
-### React Hydration
-
-The RSC webpack config (created in Task 1) handles:
-1. Server rendering SearchPage
-2. Client-side hydration
-3. Client-side rendering of SearchPageContent
-4. Lazy loading of async chunks
-
-Rails `react_component` helper automatically handles hydration.
-
-### Data Fetching Pattern
-
-- **No hooks in parent**: SearchPage is SSRed
-- **Hooks in children**: SearchPageContent has "use client", children use useState/useEffect
-- **API calls**: Each async component makes its own fetch() call
-- **Error handling**: Try/catch and AbortController for cleanup
+- Spinner shows while component loads (always, even before hydration)
+- Component renders when data arrives
+- Replaced with actual content (causes CLS)
 
 ---
 
 ## Troubleshooting
 
-**Problem**: Hydration mismatch
-- **Solution**: Ensure parent has no "use client", only child has it
+**Problem**: Content doesn't load (infinite spinner)
+- **Solution**: Check `/api/restaurants/:id/*` endpoints return valid JSON
 
-**Problem**: API calls not happening
-- **Solution**: Check Network tab in DevTools, verify `/api/restaurants/:id/*` endpoints exist
+**Problem**: Content flashes then disappears
+- **Solution**: Ensure API response includes correct data structure
 
-**Problem**: Spinners never disappear
-- **Solution**: Check API responses are valid JSON with correct format
+**Problem**: "use client" not working as expected
+- **Solution**: Verify it's at the very top of the file (before imports)
 
 ---
 
 ## Files Created/Modified
 
-- ✅ `app/javascript/entries/search.tsx`
-- ✅ `app/javascript/components/search/SearchPage.tsx`
-- ✅ `app/javascript/components/search/SearchPageContent.tsx`
-- ✅ `app/javascript/components/async/traditional/AsyncStatus.tsx`
-- ✅ `app/javascript/components/async/traditional/AsyncWaitTime.tsx`
-- ✅ `app/javascript/components/async/traditional/AsyncSpecials.tsx`
-- ✅ `app/javascript/components/async/traditional/AsyncTrending.tsx`
-- ✅ `app/javascript/components/async/traditional/AsyncRating.tsx`
-- ✅ `app/views/restaurants/search.html.erb`
-- ✅ `app/controllers/restaurants_controller.rb`
+- ✅ `app/javascript/entries/search.tsx` (webpack entry point)
+- ✅ `app/javascript/components/search/SearchPage.tsx` (WITH "use client" at root)
+- ✅ `app/javascript/components/async/traditional/AsyncStatus.tsx` (lazy-loaded, separate chunk)
+- ✅ `app/javascript/components/async/traditional/AsyncWaitTime.tsx` (lazy-loaded, separate chunk)
+- ✅ `app/javascript/components/async/traditional/AsyncSpecials.tsx` (lazy-loaded, separate chunk)
+- ✅ `app/javascript/components/async/traditional/AsyncTrending.tsx` (lazy-loaded, separate chunk)
+- ✅ `app/javascript/components/async/traditional/AsyncRating.tsx` (lazy-loaded, separate chunk)
+- ✅ `app/views/restaurants/search.html.erb` (Rails view)
+- ✅ `app/controllers/restaurants_controller.rb` (Rails controller, `search` action)
 
 ---
 
 ## Notes
 
 - Both Task 3 & 4 use the SAME webpack config created in Task 1
-- Only the component patterns differ
-- Performance difference comes from data fetching timing, not webpack configuration
-- This task demonstrates the current best practice (before RSC)
+- **Pattern**: Put `"use client"` at root level → everything in server bundle
+  - All components still SSR on server (rendered to HTML)
+  - Lazy-loaded async components code-split into separate chunks
+  - Static content visible immediately (fully SSRed)
+  - Client-side fetch waterfall causes ~500-600ms LCP
+- Async components are imported via `lazy()` for code-splitting
+- Each async component has `useState` + `useEffect` for client-side data fetching
+- Performance difference (vs RSC) comes from client-side fetch waterfall (sequential requests on client)
+- This task demonstrates traditional React SSR with lazy-loading (current standard)
