@@ -30,26 +30,29 @@ See `IMPLEMENTATION_TASKS.md` for detailed specifications.
 |------|------|------|
 | 1. Setup & Database | 8-12h | Rails app, PostgreSQL, seed 62M records |
 | 2. Shared Components & API | 12-16h | Display components, 5 API endpoints |
-| 3. Traditional Version | 10-14h | Webpack code-splitting, lazy components |
-| 4. RSC Version | 10-14h | RSC loader, async components, streaming |
+| 3. Traditional Version | 10-14h | "use client" boundary, `react_component` helper |
+| 4. RSC Version | 10-14h | Async server components, `stream_react_component` helper |
 | 5. Dashboard & Docs | 6-10h | Metrics, demo walkthrough, deployment |
+
+**Note**: Tasks 3 & 4 share the same webpack config (RSC-based). Only the component patterns and Rails helpers differ.
 
 **Critical Path**: Task 1 (blocks everything) → Task 2 (blocks both versions) → Tasks 3&4 (parallel) → Task 5
 
 ## Architecture Decisions
 
-### 1. One Database, Two Webpack Configs
+### 1. One Database, One Webpack Config (RSC-based)
 
 **Shared** (82-85% code reuse):
 - Same PostgreSQL database (50K restaurants, 10M orders)
 - Same Rails models & API endpoints
 - Same display components (StatusBadge, WaitTimeBadge, etc.)
 - Same Tailwind styling
+- **Same webpack config** (RSC-based, handles both versions)
 
 **Different**:
-- Webpack config (traditional: code-splitting, RSC: RSC loader)
 - Data fetching (client fetch vs getReactOnRailsAsyncProp)
-- View templates
+- Rails helpers (`react_component` vs `stream_react_component`)
+- Component patterns ("use client" boundary for traditional vs async server components for RSC)
 
 ### 2. Realistic Query Latency is Essential
 
@@ -79,20 +82,18 @@ Examples: StatusBadge, WaitTimeBadge, RatingBadge, SpecialsList, TrendingItems
 
 ### Data Fetching Patterns
 
-**Traditional Version**:
+**Both versions use the same RSC webpack config.** Only the component patterns differ:
+
+**Traditional Version** (with "use client" boundary):
 ```typescript
-// AsyncStatus wrapper (parent)
-const AsyncStatusLazy = lazy(() => import('./AsyncStatus.lazy'));
-export function AsyncStatus({ restaurantId }: Props) {
-  return (
-    <Suspense fallback={<Spinner />}>
-      <AsyncStatusLazy restaurantId={restaurantId} />
-    </Suspense>
-  );
+// SearchPage.tsx - SSRed by react_component helper
+export default function SearchPage({ restaurantId }: Props) {
+  return <SearchPageContent restaurantId={restaurantId} />;
 }
 
-// AsyncStatus.lazy.tsx (separate chunk)
-function AsyncStatusComponent({ restaurantId }: Props) {
+// SearchPageContent.tsx - Forces client-side via "use client"
+"use client";
+export function SearchPageContent({ restaurantId }: Props) {
   const [status, setStatus] = useState(null);
   useEffect(() => {
     fetch(`/api/restaurants/${restaurantId}/status`).then(setStatus);
@@ -101,16 +102,21 @@ function AsyncStatusComponent({ restaurantId }: Props) {
 }
 ```
 
-**RSC Version**:
+**RSC Version** (async server components):
 ```typescript
-// Server component (async function, no hooks allowed)
-async function AsyncStatus({ restaurantId }: Props) {
+// SearchPage.tsx - Async server component
+async function SearchPage({ restaurantId }: Props) {
   const status = await getReactOnRailsAsyncProp('status', { restaurantId });
+  return <SearchPageContent status={status} />;
+}
+
+// SearchPageContent.tsx - Pure display component
+export function SearchPageContent({ status }: Props) {
   return <StatusBadge status={status} />;
 }
 ```
 
-Key difference: Traditional fetches client-side, RSC fetches server-side.
+**Key difference**: Traditional uses "use client" boundary to force client-side behavior. RSC uses async functions. Same webpack, different patterns.
 
 ## Web Vitals Targets
 

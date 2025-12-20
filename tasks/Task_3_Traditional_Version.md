@@ -1,22 +1,23 @@
 # Task 3: Traditional Version
 
 **Time**: 10-14 hours
-**Dependencies**: Task 2 (Components & API complete)
+**Dependencies**: Task 1 (webpack config complete), Task 2 (Components & API complete)
 **Can Run Parallel With**: Task 4 (RSC Version)
 
 ---
 
 ## Overview
 
-Build the traditional SSR + lazy-loading version. This demonstrates the current best practice: SSR static parts, lazy-load dynamic parts, client-side data fetching.
+Build the traditional SSR + client-side fetching version. This demonstrates current best practice: SSR the page, then client components handle data fetching.
 
-**Key Pattern**:
-1. Server renders static content (restaurant name, image)
-2. Browser downloads JS bundles (code-split lazy chunks)
-3. React hydrates
-4. Lazy components mount
-5. useEffect sends API requests
-6. Spinners replaced with content
+**Key Principle**: Use "use client" boundary to force components to be client-side, similar to how `lazy()` works but using React 19's native approach.
+
+**Pattern**:
+1. Parent component (SearchPage) SSRed by `react_component` helper
+2. Child component (SearchPageContent) marked with "use client" directive
+3. Child component contains async components with useState + useEffect
+4. Data fetched client-side via fetch API
+5. Spinners show while loading, replaced when data arrives
 
 **Expected Performance**: LCP ~500-600ms, CLS ~0.10-0.15
 
@@ -24,294 +25,91 @@ Build the traditional SSR + lazy-loading version. This demonstrates the current 
 
 ## Deliverables
 
-### 1. Webpack Configuration
-
-Create `config/webpack/webpack.config.js`:
-
-```javascript
-const path = require('path');
-const webpack = require('webpack');
-const MiniCssExtractPlugin = require('mini-css-extract-plugin');
-
-const isProduction = process.env.NODE_ENV === 'production';
-
-module.exports = {
-  mode: isProduction ? 'production' : 'development',
-  entry: {
-    search: './app/javascript/entries/search.tsx',
-  },
-  output: {
-    path: path.resolve(__dirname, '../../app/assets/webpack/traditional'),
-    filename: isProduction ? '[name].[contenthash].js' : '[name].js',
-    chunkFilename: isProduction ? '[name].[contenthash].chunk.js' : '[name].chunk.js',
-    clean: true,
-  },
-  devtool: isProduction ? 'source-map' : 'eval-source-map',
-  module: {
-    rules: [
-      {
-        test: /\.tsx?$/,
-        use: ['babel-loader'],
-        exclude: /node_modules/,
-      },
-      {
-        test: /\.css$/,
-        use: [
-          isProduction ? MiniCssExtractPlugin.loader : 'style-loader',
-          'css-loader',
-          'postcss-loader',
-        ],
-      },
-      {
-        test: /\.(png|jpg|gif|svg)$/,
-        type: 'asset/resource',
-      },
-    ],
-  },
-  resolve: {
-    extensions: ['.ts', '.tsx', '.js'],
-    alias: {
-      '@components': path.resolve(__dirname, '../../app/javascript/components'),
-      '@utils': path.resolve(__dirname, '../../app/javascript/utils'),
-      '@types': path.resolve(__dirname, '../../app/javascript/types'),
-    },
-  },
-  plugins: [
-    new MiniCssExtractPlugin({
-      filename: isProduction ? '[name].[contenthash].css' : '[name].css',
-    }),
-    new webpack.DefinePlugin({
-      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
-    }),
-  ],
-  optimization: {
-    minimize: isProduction,
-    splitChunks: {
-      chunks: 'all',
-      cacheGroups: {
-        vendor: {
-          test: /[\\/]node_modules[\\/]/,
-          name: 'vendors',
-          priority: 10,
-        },
-        common: {
-          minChunks: 2,
-          priority: 5,
-          reuseExistingChunk: true,
-        },
-      },
-    },
-  },
-};
-```
-
-**Key Points**:
-- Entry point: `app/javascript/entries/search.tsx`
-- Output to: `app/assets/webpack/traditional/`
-- Code-splitting enabled (automatic for `lazy()` components)
-- CSS extraction with MiniCssExtractPlugin
-- Source maps for debugging
-
----
-
-### 2. Entry Point
+### 1. Entry Point
 
 Create `app/javascript/entries/search.tsx`:
 
 ```typescript
 import React from 'react';
-import { createRoot } from 'react-dom/client';
-import { RestaurantSearch } from '../components/search/RestaurantSearch';
+import SearchPage from '../components/search/SearchPage';
 
-// Mount React component
-const container = document.getElementById('root');
-if (container) {
-  const root = createRoot(container);
-  root.render(<RestaurantSearch />);
-}
+export default SearchPage;
 ```
 
 ---
 
-### 3. Lazy-Loaded Async Components
+### 2. Parent Component (SSRed)
 
-**Key Pattern**: Each dynamic part has a wrapper (with Suspense) and a lazy component (in separate chunk).
+Create `app/javascript/components/search/SearchPage.tsx`:
 
-Create in `app/javascript/components/async/traditional/`:
-
-#### AsyncStatus.tsx (Wrapper with Suspense)
 ```typescript
-import { lazy, Suspense } from 'react';
-import { Spinner } from '@components/ui/Spinner';
-
-const AsyncStatusLazy = lazy(() => import('./AsyncStatus.lazy'));
+import React from 'react';
+import SearchPageContent from './SearchPageContent';
 
 interface Props {
-  restaurantId: number;
+  restaurant_id: number;
 }
 
-export function AsyncStatus({ restaurantId }: Props) {
+export default function SearchPage({ restaurant_id }: Props) {
   return (
-    <Suspense fallback={<Spinner label="Checking status..." />}>
-      <AsyncStatusLazy restaurantId={restaurantId} />
-    </Suspense>
-  );
-}
-```
-
-#### AsyncStatus.lazy.tsx (Lazy Component - Separate Chunk)
-```typescript
-import { useEffect, useState } from 'react';
-import { StatusBadge } from '@components/restaurant/StatusBadge';
-import type { StatusData } from '@types';
-
-interface Props {
-  restaurantId: number;
-}
-
-interface StatusResponse {
-  status: StatusData;
-  timestamp: string;
-}
-
-function AsyncStatusComponent({ restaurantId }: Props) {
-  const [status, setStatus] = useState<StatusData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const fetchStatus = async () => {
-      try {
-        setIsLoading(true);
-        const response = await fetch(
-          `/api/restaurants/${restaurantId}/status`,
-          { signal: controller.signal }
-        );
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data: StatusResponse = await response.json();
-        setStatus(data.status);
-        setError(null);
-      } catch (err) {
-        if (err instanceof Error && err.name !== 'AbortError') {
-          setError(err.message);
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchStatus();
-
-    return () => controller.abort();
-  }, [restaurantId]);
-
-  if (error) {
-    return <div className="text-sm text-red-600">Error: {error}</div>;
-  }
-
-  if (!status) return null;
-
-  return <StatusBadge status={status} />;
-}
-
-export default AsyncStatusComponent;
-```
-
-**Create 5 async component pairs** (wrapper + lazy):
-1. `AsyncStatus` / `AsyncStatus.lazy` - Check if open
-2. `AsyncWaitTime` / `AsyncWaitTime.lazy` - Current wait time
-3. `AsyncSpecials` / `AsyncSpecials.lazy` - Active promotions
-4. `AsyncTrending` / `AsyncTrending.lazy` - Popular items
-5. `AsyncRating` / `AsyncRating.lazy` - Average rating
-
-All follow same pattern: useState + useEffect + fetch().
-
----
-
-### 4. Container Component
-
-Create `app/javascript/components/search/RestaurantSearch.tsx`:
-
-```typescript
-import { useState, useEffect } from 'react';
-import { SearchHeader } from './SearchHeader';
-import { RestaurantGrid } from './RestaurantGrid';
-import { RestaurantCard } from './RestaurantCard';
-import type { Restaurant } from '@types';
-
-export function RestaurantSearch() {
-  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchRestaurants = async () => {
-      try {
-        // For initial load, we'd fetch from /restaurants endpoint
-        // For demo, we're SSRing this data directly in view
-        setIsLoading(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load');
-        setIsLoading(false);
-      }
-    };
-
-    fetchRestaurants();
-  }, []);
-
-  if (error) {
-    return <div className="text-red-600">{error}</div>;
-  }
-
-  return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <SearchHeader />
-      {/* Restaurants passed from SSR, dynamic data lazy-loaded per card */}
+    <div className="container mx-auto p-4">
+      <h1 className="text-3xl font-bold mb-6">Restaurant Details</h1>
+      <SearchPageContent restaurantId={restaurant_id} />
     </div>
   );
 }
 ```
 
-Create `app/javascript/components/search/RestaurantCard.tsx`:
+This component will be SSRed by the Rails `react_component` helper.
+
+---
+
+### 3. Client-Side Components ("use client")
+
+Create `app/javascript/components/search/SearchPageContent.tsx`:
 
 ```typescript
-import { RestaurantCardHeader } from '@components/restaurant/RestaurantCardHeader';
-import { RestaurantCardFooter } from '@components/restaurant/RestaurantCardFooter';
-import { AsyncStatus } from '@components/async/traditional/AsyncStatus';
-import { AsyncWaitTime } from '@components/async/traditional/AsyncWaitTime';
-import { AsyncSpecials } from '@components/async/traditional/AsyncSpecials';
-import { AsyncTrending } from '@components/async/traditional/AsyncTrending';
-import { AsyncRating } from '@components/async/traditional/AsyncRating';
-import type { Restaurant } from '@types';
+"use client";
+
+import React, { Suspense } from 'react';
+import AsyncStatus from '../async/traditional/AsyncStatus';
+import AsyncWaitTime from '../async/traditional/AsyncWaitTime';
+import AsyncSpecials from '../async/traditional/AsyncSpecials';
+import AsyncTrending from '../async/traditional/AsyncTrending';
+import AsyncRating from '../async/traditional/AsyncRating';
+import Spinner from '../shared/Spinner';
 
 interface Props {
-  restaurant: Restaurant;
+  restaurantId: number;
 }
 
-export function RestaurantCard({ restaurant }: Props) {
+export default function SearchPageContent({ restaurantId }: Props) {
   return (
-    <div className="bg-white rounded-lg shadow-md overflow-hidden">
-      <div className="p-6">
-        {/* Static content (SSRed) */}
-        <RestaurantCardHeader restaurant={restaurant} />
+    <div className="space-y-6">
+      {/* Static content */}
+      <RestaurantCardHeader restaurantId={restaurantId} />
 
-        {/* Dynamic content (lazy-loaded) */}
-        <div className="space-y-3 my-4">
-          <AsyncStatus restaurantId={restaurant.id} />
-          <AsyncWaitTime restaurantId={restaurant.id} />
-          <AsyncSpecials restaurantId={restaurant.id} />
-          <AsyncTrending restaurantId={restaurant.id} />
-          <AsyncRating restaurantId={restaurant.id} />
-        </div>
+      {/* Dynamic content with fallback spinners */}
+      <div className="grid grid-cols-2 gap-4">
+        <Suspense fallback={<Spinner label="Checking status..." />}>
+          <AsyncStatus restaurantId={restaurantId} />
+        </Suspense>
 
-        {/* Static footer */}
-        <RestaurantCardFooter restaurant={restaurant} />
+        <Suspense fallback={<Spinner label="Getting wait time..." />}>
+          <AsyncWaitTime restaurantId={restaurantId} />
+        </Suspense>
+
+        <Suspense fallback={<Spinner label="Loading specials..." />}>
+          <AsyncSpecials restaurantId={restaurantId} />
+        </Suspense>
+
+        <Suspense fallback={<Spinner label="Finding trending items..." />}>
+          <AsyncTrending restaurantId={restaurantId} />
+        </Suspense>
+
+        <Suspense fallback={<Spinner label="Fetching ratings..." />}>
+          <AsyncRating restaurantId={restaurantId} />
+        </Suspense>
       </div>
     </div>
   );
@@ -320,347 +118,213 @@ export function RestaurantCard({ restaurant }: Props) {
 
 ---
 
-### 5. View Template
+### 4. Async Components (client-side fetch)
+
+Create `app/javascript/components/async/traditional/AsyncStatus.tsx`:
+
+```typescript
+"use client";
+
+import React, { useState, useEffect } from 'react';
+import StatusBadge from '../../restaurant/StatusBadge';
+
+interface StatusData {
+  status: 'open' | 'closed' | 'custom_hours';
+  timestamp: number;
+}
+
+interface Props {
+  restaurantId: number;
+}
+
+export default function AsyncStatus({ restaurantId }: Props) {
+  const [status, setStatus] = useState<StatusData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch(`/api/restaurants/${restaurantId}/status`, {
+      signal: controller.signal,
+    })
+      .then((res) => res.json())
+      .then((data: StatusData) => {
+        setStatus(data);
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          setError('Failed to load status');
+        }
+      });
+
+    return () => controller.abort();
+  }, [restaurantId]);
+
+  if (error) return <div className="text-red-600">{error}</div>;
+  if (!status) return null;
+
+  return <StatusBadge status={status.status} />;
+}
+```
+
+Create similar async components:
+- `AsyncWaitTime.tsx` - Fetches `/api/restaurants/:id/wait_time`
+- `AsyncSpecials.tsx` - Fetches `/api/restaurants/:id/specials`
+- `AsyncTrending.tsx` - Fetches `/api/restaurants/:id/trending`
+- `AsyncRating.tsx` - Fetches `/api/restaurants/:id/rating`
+
+---
+
+### 5. Rails View
 
 Create `app/views/restaurants/search.html.erb`:
 
 ```erb
-<div id="root" data-controller="search">
-  <div class="p-8 max-w-7xl mx-auto">
-    <h1 class="text-4xl font-bold mb-2">Find Restaurants</h1>
-    <p class="text-gray-600">Discover local restaurants and real-time wait times</p>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-      <% @restaurants.each do |restaurant| %>
-        <div class="bg-white rounded-lg shadow-md overflow-hidden">
-          <div class="p-6">
-            <!-- Static content (SSRed) -->
-            <%= react_component('RestaurantCardHeader', {
-              restaurant: restaurant.as_json
-            }, prerender: :sync) %>
-
-            <!-- Dynamic content (lazy-loaded on client) -->
-            <div class="space-y-3 my-4">
-              <%= react_component('AsyncStatus', {
-                restaurantId: restaurant.id
-              }) %>
-              <%= react_component('AsyncWaitTime', {
-                restaurantId: restaurant.id
-              }) %>
-              <%= react_component('AsyncSpecials', {
-                restaurantId: restaurant.id
-              }) %>
-              <%= react_component('AsyncTrending', {
-                restaurantId: restaurant.id
-              }) %>
-              <%= react_component('AsyncRating', {
-                restaurantId: restaurant.id
-              }) %>
-            </div>
-
-            <!-- Static footer -->
-            <%= react_component('RestaurantCardFooter', {
-              restaurant: restaurant.as_json
-            }, prerender: :sync) %>
-          </div>
-        </div>
-      <% end %>
-    </div>
-  </div>
+<div id="search-page-app">
+  <%= react_component(
+    "SearchPage",
+    { restaurant_id: @restaurant.id },
+    { prerender: true }
+  ) %>
 </div>
+
+<script>
+  // Collect Web Vitals
+  import { getCLS, getFID, getFCP, getLCP, getTTFB } from 'web-vitals';
+
+  getCLS(metric => sendMetric(metric));
+  getFID(metric => sendMetric(metric));
+  getFCP(metric => sendMetric(metric));
+  getLCP(metric => sendMetric(metric));
+  getTTFB(metric => sendMetric(metric));
+
+  function sendMetric(metric) {
+    fetch('/api/performance_metrics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: metric.name,
+        value: metric.value,
+        page_type: 'traditional',
+        timestamp: new Date().toISOString(),
+      }),
+    });
+  }
+</script>
 ```
 
 ---
 
-### 6. Controller Action
+### 6. Routes Configuration
 
-Create/Update `app/controllers/restaurants_controller.rb`:
+Add to `config/routes.rb`:
+
+```ruby
+get '/search', to: 'restaurants#search'
+get '/api/restaurants/:id/status', to: 'api/restaurants#status'
+get '/api/restaurants/:id/wait_time', to: 'api/restaurants#wait_time'
+get '/api/restaurants/:id/specials', to: 'api/restaurants#specials'
+get '/api/restaurants/:id/trending', to: 'api/restaurants#trending'
+get '/api/restaurants/:id/rating', to: 'api/restaurants#rating'
+```
+
+---
+
+### 7. Rails Controller
+
+Create `app/controllers/restaurants_controller.rb`:
 
 ```ruby
 class RestaurantsController < ApplicationController
   def search
-    # Load restaurants for server rendering
-    @restaurants = Restaurant.order(average_rating: :desc).limit(20)
-
-    # SSR the page with static content
-    # Dynamic content will lazy-load on client
-  end
-
-  def search_rsc
-    # RSC version - same data
-    @restaurants = Restaurant.order(average_rating: :desc).limit(20)
+    @restaurant = Restaurant.find(params[:id] || 1)
   end
 end
 ```
 
 ---
 
-### 7. Performance Monitoring
-
-Create `app/javascript/utils/performance/traditional-vitals.ts`:
-
-```typescript
-export function initializePerformanceMonitoring() {
-  // Collect Web Vitals
-  let lcp = 0;
-  let cls = 0;
-  let inp = 0;
-
-  // LCP - Largest Contentful Paint
-  const paintObserver = new PerformanceObserver((entryList) => {
-    const entries = entryList.getEntries();
-    const lastEntry = entries[entries.length - 1];
-    lcp = lastEntry.startTime;
-  });
-  paintObserver.observe({ entryTypes: ['largest-contentful-paint'] });
-
-  // CLS - Cumulative Layout Shift
-  const layoutShiftObserver = new PerformanceObserver((entryList) => {
-    for (const entry of entryList.getEntries()) {
-      if (!(entry as any).hadRecentInput) {
-        cls += (entry as any).value;
-      }
-    }
-  });
-  layoutShiftObserver.observe({ entryTypes: ['layout-shift'] });
-
-  // INP - Interaction to Next Paint
-  const interactionObserver = new PerformanceObserver((entryList) => {
-    for (const entry of entryList.getEntries()) {
-      inp = Math.max(inp, (entry as any).duration);
-    }
-  });
-  interactionObserver.observe({ entryTypes: ['interaction'] });
-
-  // Send metrics when page unloads
-  window.addEventListener('beforeunload', () => {
-    sendMetrics({
-      version: 'traditional',
-      lcp,
-      cls,
-      inp,
-      timestamp: new Date().toISOString(),
-    });
-  });
-}
-
-async function sendMetrics(metrics: any) {
-  try {
-    await fetch('/api/performance_metrics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(metrics),
-    });
-  } catch (err) {
-    console.error('Failed to send metrics:', err);
-  }
-}
-```
-
-Include in entry point:
-```typescript
-import { initializePerformanceMonitoring } from '../utils/performance/traditional-vitals';
-
-// In entries/search.tsx
-if (typeof window !== 'undefined') {
-  initializePerformanceMonitoring();
-}
-```
-
----
-
-## File Structure
-
-```
-app/javascript/
-├─ entries/
-│  └─ search.tsx
-├─ components/
-│  ├─ restaurant/          (Task 2 - shared)
-│  ├─ search/
-│  │  ├─ SearchHeader.tsx
-│  │  ├─ RestaurantGrid.tsx
-│  │  ├─ RestaurantSearch.tsx
-│  │  └─ RestaurantCard.tsx
-│  ├─ async/
-│  │  └─ traditional/      (THIS TASK)
-│  │     ├─ AsyncStatus.tsx
-│  │     ├─ AsyncStatus.lazy.tsx
-│  │     ├─ AsyncWaitTime.tsx
-│  │     ├─ AsyncWaitTime.lazy.tsx
-│  │     ├─ AsyncSpecials.tsx
-│  │     ├─ AsyncSpecials.lazy.tsx
-│  │     ├─ AsyncTrending.tsx
-│  │     ├─ AsyncTrending.lazy.tsx
-│  │     ├─ AsyncRating.tsx
-│  │     └─ AsyncRating.lazy.tsx
-│  └─ ui/
-│     └─ Spinner.tsx
-└─ utils/
-   └─ performance/
-      └─ traditional-vitals.ts
-
-config/webpack/
-├─ webpack.config.js
-├─ webpack.development.js
-└─ webpack.production.js
-
-app/views/restaurants/
-├─ search.html.erb          (THIS TASK)
-└─ search_rsc.html.erb      (Task 4)
-
-app/controllers/
-└─ restaurants_controller.rb (THIS TASK)
-```
-
----
-
 ## Success Criteria
 
-### Must Have ✅
-
-- [ ] Webpack config builds without errors
-- [ ] `npm run build` creates separate chunks for lazy components
-- [ ] `/search` route works and displays restaurants
-- [ ] Static content SSRs immediately
-- [ ] Spinners display while lazy components load
-- [ ] Lazy components load separately (verify in DevTools Network)
-- [ ] All 5 async components render correctly with data
-- [ ] No hydration mismatches
-
-### Performance ⚡
-
-- [ ] LCP: ~500-600ms (Static content visible after ~50ms, dynamic content after ~400-500ms)
-- [ ] CLS: ~0.10-0.15 (Spinners replaced by content)
-- [ ] INP: ~80-100ms (Fetch + render latency)
-- [ ] Static JS bundle: ~35-40 KB (main chunk)
-- [ ] Lazy chunks: ~5-10 KB each
-- [ ] API requests visible in Network tab
-- [ ] All 5 requests in parallel (not waterfall)
-
-### Code Quality
-
-- [ ] TypeScript compilation succeeds
-- [ ] No console errors or warnings
-- [ ] Components responsive (mobile, tablet, desktop)
-- [ ] Accessibility score >90
+- [ ] `/search` page loads and renders
+- [ ] Parent (SearchPage) SSRs on server
+- [ ] Child (SearchPageContent) marked "use client"
+- [ ] Spinners visible initially
+- [ ] All 5 async components load (separate API calls)
+- [ ] Spinners replaced with content when ready
+- [ ] Web Vitals collected and posted to `/api/performance_metrics`
+- [ ] Web Vitals measured: LCP ~500-600ms, CLS ~0.10-0.15
+- [ ] Console shows no errors
 
 ---
 
-## Key Implementation Notes
+## Key Technical Details
 
-### lazy() vs Regular Import
+### "use client" vs lazy()
 
+**Traditional approach (not used here)**:
 ```typescript
-// ❌ WRONG - No code-splitting
-import AsyncStatus from './AsyncStatus.lazy';
-
-// ✅ CORRECT - Creates separate chunk
 const AsyncStatusLazy = lazy(() => import('./AsyncStatus.lazy'));
 ```
 
-### Suspense Boundary Pattern
-
+**New approach (Task 3 uses this)**:
 ```typescript
-// ✅ CORRECT - Spinner shows while lazy component loads
-<Suspense fallback={<Spinner />}>
-  <AsyncStatusLazy restaurantId={restaurantId} />
-</Suspense>
+"use client";
+// Component is client-side JavaScript
 ```
 
-### Abort Controller Cleanup
+Both achieve the same goal: force component to be client-side. The "use client" directive is React 19's native approach.
 
-```typescript
-// ✅ CORRECT - Cleanup prevents memory leaks
-useEffect(() => {
-  const controller = new AbortController();
-  fetch(..., { signal: controller.signal });
-  return () => controller.abort();
-}, [restaurantId]);
-```
+### React Hydration
 
----
+The RSC webpack config (created in Task 1) handles:
+1. Server rendering SearchPage
+2. Client-side hydration
+3. Client-side rendering of SearchPageContent
+4. Lazy loading of async chunks
 
-## Timeline (Expected)
+Rails `react_component` helper automatically handles hydration.
 
-This shows when each piece loads for user:
+### Data Fetching Pattern
 
-1. **0-50ms**: Browser receives HTML with SSRed static content
-2. **50-100ms**: Static content renders, user sees restaurants
-3. **100-150ms**: JavaScript bundles download and parse
-4. **150-200ms**: React hydrates, lazy components mount
-5. **200-350ms**: Lazy components send API requests (5 in parallel)
-6. **350-500ms**: Database queries run (~100-150ms for wait_time)
-7. **500-600ms**: Spinners replaced with content
-8. **Total LCP**: ~500-600ms
-
----
-
-## Testing
-
-```typescript
-// Test lazy component works
-describe('AsyncStatus lazy component', () => {
-  it('fetches and displays status', async () => {
-    const { getByText } = render(
-      <Suspense fallback={<div>Loading...</div>}>
-        <AsyncStatusLazy restaurantId={1} />
-      </Suspense>
-    );
-
-    expect(getByText('Loading...')).toBeInTheDocument();
-    expect(await getByText(/open|closed/i)).toBeInTheDocument();
-  });
-});
-
-// Test performance
-describe('Traditional version performance', () => {
-  it('has LCP around 500-600ms', async () => {
-    const start = performance.now();
-    await render(<RestaurantSearch />);
-    const elapsed = performance.now() - start;
-    expect(elapsed).toBeGreaterThan(500);
-    expect(elapsed).toBeLessThan(700);
-  });
-});
-```
-
----
-
-## Handoff Criteria
-
-Complete when:
-
-- [ ] `/search` loads restaurants with dynamic content
-- [ ] Lazy components load separately (visible in Network tab)
-- [ ] LCP ~500-600ms, CLS ~0.10-0.15
-- [ ] All spinners display and replace correctly
-- [ ] TypeScript types everywhere
-- [ ] No console errors
-
-**Next**: Task 4 (RSC Version) - Can run in parallel with this task
+- **No hooks in parent**: SearchPage is SSRed
+- **Hooks in children**: SearchPageContent has "use client", children use useState/useEffect
+- **API calls**: Each async component makes its own fetch() call
+- **Error handling**: Try/catch and AbortController for cleanup
 
 ---
 
 ## Troubleshooting
 
-**Q: Lazy components not code-splitting**
-A: Verify `lazy(() => import(...))` syntax. Check webpack.config.js splitChunks config.
+**Problem**: Hydration mismatch
+- **Solution**: Ensure parent has no "use client", only child has it
 
-**Q: Hydration mismatch**
-A: Ensure server-rendered HTML matches client React tree. Check SSR prerender flags.
+**Problem**: API calls not happening
+- **Solution**: Check Network tab in DevTools, verify `/api/restaurants/:id/*` endpoints exist
 
-**Q: Spinners stay forever**
-A: Check Network tab - are API requests being sent? Check for fetch errors in console.
-
-**Q: LCP >700ms**
-A: Too slow. Check if main bundle is too large. Verify code-splitting working.
+**Problem**: Spinners never disappear
+- **Solution**: Check API responses are valid JSON with correct format
 
 ---
 
-## Resources
+## Files Created/Modified
 
-- Code-splitting: https://webpack.js.org/guides/code-splitting/
-- React Suspense: https://react.dev/reference/react/Suspense
-- Web Vitals: https://web.dev/vitals/
-- Server-Side Rendering: https://guides.rubyonrails.org/asset_pipeline.html
+- ✅ `app/javascript/entries/search.tsx`
+- ✅ `app/javascript/components/search/SearchPage.tsx`
+- ✅ `app/javascript/components/search/SearchPageContent.tsx`
+- ✅ `app/javascript/components/async/traditional/AsyncStatus.tsx`
+- ✅ `app/javascript/components/async/traditional/AsyncWaitTime.tsx`
+- ✅ `app/javascript/components/async/traditional/AsyncSpecials.tsx`
+- ✅ `app/javascript/components/async/traditional/AsyncTrending.tsx`
+- ✅ `app/javascript/components/async/traditional/AsyncRating.tsx`
+- ✅ `app/views/restaurants/search.html.erb`
+- ✅ `app/controllers/restaurants_controller.rb`
+
+---
+
+## Notes
+
+- Both Task 3 & 4 use the SAME webpack config created in Task 1
+- Only the component patterns differ
+- Performance difference comes from data fetching timing, not webpack configuration
+- This task demonstrates the current best practice (before RSC)
