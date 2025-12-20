@@ -16,9 +16,4 @@ registerServerComponent({
   SimpleServerComponent,
 });
 
-// Make React available globally for testing
-if (process.env.NODE_ENV === 'test') {
-  globalThis.React = require('react');
-}
-
 console.log('[LocalHub Demo] Server bundle loaded');
