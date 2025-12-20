@@ -56,7 +56,6 @@ development:
   dev_server:
     host: localhost
     port: 3035
-    https: false
     hmr: true
     client:
       overlay: true

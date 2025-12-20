@@ -1,9 +1,11 @@
 Rails.application.routes.draw do
+  rsc_payload_route
   # Health check endpoint
   get 'up' => 'rails/health#show', as: :rails_health_check
 
   # Root route (will be updated later)
   root 'home#index'
+  get '/rsc' => 'home#rsc'
 
   # Search routes (Tasks 3 & 4)
   get '/search', to: 'restaurants#search'
