@@ -116,10 +116,10 @@ restaurants (50K)
 **Goal**: Traditional React SSR with client-side data fetching, using server bundle
 
 **Important**: Task 3 & 4 share the same webpack config created in Task 1. The difference:
-- Task 3: "use client" at root → all components in server bundle → lazy-load async chunks → client-side fetch
-- Task 4: No "use client" (async function) → components in RSC bundle → server-side fetch
+- Task 3: "use client" at root → all components in client bundle → SSR renders static parts, lazy-loaded components NOT SSRed (only their fallbacks) → client-side data fetch
+- Task 4: No "use client" (async server components) → components in RSC bundle → entire page SSRed including client components → server-side data fetch
 
-**Key Pattern**: Put `"use client"` at root level. Everything underneath is in the server bundle (traditional React).
+**Key Pattern**: Put `"use client"` at root level. Everything underneath becomes a client component and goes into the client bundle (not the RSC bundle).
 
 ### Deliverables
 
@@ -135,8 +135,8 @@ restaurants (50K)
 - SSRed by `react_component` helper
 - Returns SearchPageContent as child
 
-**Client-Side Components** ("use client" boundary):
-- `SearchPageContent` with "use client" directive
+**Client Components** (all components under the "use client" root):
+- `SearchPageContent` - main content component
 - `AsyncStatus` component with useState + useEffect
 - `AsyncWaitTime` component with useState + useEffect
 - `AsyncSpecials` component with useState + useEffect

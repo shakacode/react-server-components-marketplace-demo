@@ -11,11 +11,13 @@
 Build the React Server Components (RSC) + streaming version. This demonstrates how RSC dramatically improves Web Vitals by fetching all data server-side before rendering.
 
 **Key Principle**: Root component is an async function WITHOUT `"use client"` directive, which tells webpack:
-- ✅ Put this in the RSC bundle (not server bundle)
+- ✅ Put this in the RSC bundle (server components)
 - ✅ SSRed via RSC pipeline (server-side async rendering)
+- ✅ **Entire page is SSRed** - both server components AND any client components lower in the tree
 - ✅ Streamed to browser as Suspense boundaries resolve
 - ✅ All data fetched server-side via getReactOnRailsAsyncProp
-- ❌ No `"use client"` directive (uses RSC, not traditional SSR)
+- ✅ Client components CAN exist lower in tree (with `"use client"` directive) for interactivity
+- ❌ No `"use client"` at root level (uses RSC, not traditional SSR)
 
 **Pattern**:
 1. Root component is async function (no `"use client"`)
@@ -376,5 +378,10 @@ Traditional:
 
 - Both Task 3 & 4 use the SAME webpack config created in Task 1
 - Only the component patterns and Rails helpers differ
+- **Key difference from Task 3**:
+  - Task 3 (Traditional): `"use client"` at root → client bundle → lazy components NOT SSRed → client-side fetch
+  - Task 4 (RSC): No `"use client"` at root → RSC bundle → entire page SSRed (including any client components) → server-side fetch
+- RSC pages CAN have client components (with `"use client"` directive) lower in the tree for interactivity (state, effects, context)
+- Client components in RSC pages are still SSRed, unlike lazy-loaded components in traditional pages
 - Performance difference comes from data fetching timing on server vs client
 - This task demonstrates React 19 Server Components (future best practice)

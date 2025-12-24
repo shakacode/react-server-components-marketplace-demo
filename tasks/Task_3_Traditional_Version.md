@@ -10,22 +10,23 @@
 
 Build the traditional React SSR with client-side data fetching version.
 
-**Key Principle**: Use `"use client"` at the root level to put the entire page in the server bundle (traditional React).
+**Key Principle**: Use `"use client"` at the root level. This makes ALL components in the tree become **client components** that go into the **client bundle** (not the RSC bundle).
 
 - ✅ Root component: `"use client"` directive at the top
-- ✅ All components underneath: automatically in server bundle (traditional React with hooks)
-- ✅ Static content: fully SSRed on server, visible immediately
-- ✅ Async components: lazy() code-split into separate chunks
+- ✅ All components underneath: become client components (can use hooks, state, effects)
+- ✅ Components go into the client bundle, NOT the RSC bundle
+- ✅ Static parts: SSRed on server
+- ✅ Lazy-loaded components: **NOT SSRed** - only their Suspense fallbacks (spinners) render on server
 - ✅ Data fetches: client-side via useEffect/fetch (after hydration)
 
 **Pattern**:
 1. Root component has `"use client"` directive
-2. All components inherit server bundle context
+2. All imported components become client components (client bundle)
 3. Use lazy() to code-split async components
-4. Each async component (lazy-loaded) has useState + useEffect for data fetching
-5. useEffect sends API requests when component mounts
+4. Lazy-loaded components are NOT SSRed - only their fallbacks render on server
+5. After hydration, lazy components load and useEffect fires API requests
 6. Spinners replaced with content when data arrives
-7. **Result**: 500-600ms LCP with lazy-loaded chunks
+7. **Result**: 500-600ms LCP with client-side fetch waterfall
 
 **Expected Performance**: LCP ~500-600ms, CLS ~0.10-0.15
 
@@ -51,13 +52,13 @@ export default SearchPage;
 Create `app/javascript/components/search/SearchPage.tsx`:
 
 ```typescript
-"use client";  // ← Add this at the root level
+"use client";  // ← Makes this and ALL imported components into client components (client bundle)
 
 import React, { Suspense, lazy } from 'react';
 import RestaurantCardHeader from '../restaurant/RestaurantCardHeader';
 import Spinner from '../shared/Spinner';
 
-// Code-split async components into separate chunks
+// Lazy-loaded components - these are NOT SSRed, only their fallbacks are
 const AsyncStatus = lazy(() => import('../async/traditional/AsyncStatus'));
 const AsyncWaitTime = lazy(() => import('../async/traditional/AsyncWaitTime'));
 const AsyncSpecials = lazy(() => import('../async/traditional/AsyncSpecials'));
@@ -73,10 +74,10 @@ export default function SearchPage({ restaurant_id }: Props) {
     <div className="container mx-auto p-4">
       <h1 className="text-3xl font-bold mb-6">Restaurant Details</h1>
 
-      {/* Static content - fully SSRed on server */}
+      {/* Static content - SSRed on server */}
       <RestaurantCardHeader restaurantId={restaurant_id} />
 
-      {/* Dynamic content - lazy-loaded into separate chunks */}
+      {/* Lazy-loaded content - NOT SSRed, only spinners render on server */}
       <div className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
           <Suspense fallback={<Spinner label="Checking status..." />}>
@@ -105,7 +106,7 @@ export default function SearchPage({ restaurant_id }: Props) {
 }
 ```
 
-**Key**: `"use client"` at root level puts everything in the server bundle (traditional React). All components still SSR, but lazy-loaded async components are code-split into separate chunks.
+**Key**: `"use client"` at root level makes all components become client components (go into client bundle, NOT RSC bundle). Static parts are SSRed, but lazy-loaded components are NOT SSRed - only their Suspense fallbacks (spinners) render on the server.
 
 ---
 
@@ -166,7 +167,7 @@ Create similar async components:
 - `AsyncRating.tsx` - Fetches `/api/restaurants/:id/rating`
 
 **Key**: Each async component is in its own file and imported via `lazy()` → separate chunk in webpack bundle.
-Only async parts are code-split, static parts are fully SSRed as HTML.
+**Important**: Lazy-loaded components are NOT SSRed - only their Suspense fallbacks (spinners) render on server. After hydration, the lazy chunks load and fetch data client-side.
 
 ---
 
@@ -256,28 +257,30 @@ end
 
 ### What "use client" Does
 
-`"use client"` is often misnamed—it doesn't mean "client-only":
-- ✅ Component is still SSR'd (rendered to HTML on server)
-- ✅ Component is still hydrated (interactive on client)
+`"use client"` marks the boundary where components become **client components**:
+- ✅ The component AND all components it imports become client components
+- ✅ Client components go into the **client bundle** (NOT the RSC bundle)
+- ✅ Static parts of client components CAN be SSRed
+- ❌ Lazy-loaded components (via `lazy()`) are NOT SSRed - only their fallbacks render
+- ✅ Client components can use hooks (useState, useEffect, etc.), state, and context
 - ❌ Component is NOT in RSC bundle (excluded from server components)
-- ✅ Component IS in server bundle (traditional SSR bundle)
 
-**Result**: Traditional React SSR pattern (not RSC).
+**Result**: Traditional React pattern with client-side interactivity.
 
 ### Why This Feels Slow
 
 ```
 Timeline:
-0-50ms:   SSRed HTML received (spinners visible)
-50-100ms: JS bundles download
+0-50ms:   SSRed HTML received (spinners visible because lazy components NOT SSRed)
+50-100ms: JS bundles download (main bundle + lazy chunks)
 100-150ms: React hydrates
-150-200ms: Async components mount, useEffect fires
+150-200ms: Lazy components load and mount, useEffect fires
 200-350ms: API requests in flight (~100-150ms wait_time query)
 350-500ms: Responses received, spinners replaced with content
 500-600ms: All content visible (LCP)
 ```
 
-Each async component fetches sequentially on client → waterfall effect.
+Lazy-loaded components fetch data client-side → waterfall effect.
 
 ### Suspense + fallback Pattern
 
@@ -287,9 +290,9 @@ Each async component fetches sequentially on client → waterfall effect.
 </Suspense>
 ```
 
-- Spinner shows while component loads (always, even before hydration)
-- Component renders when data arrives
-- Replaced with actual content (causes CLS)
+- **On server**: Only the Spinner fallback is rendered (lazy component NOT SSRed)
+- **After hydration**: Lazy chunk loads, component mounts, useEffect fetches data
+- **When data arrives**: Spinner replaced with actual content (causes CLS)
 
 ---
 
@@ -323,12 +326,14 @@ Each async component fetches sequentially on client → waterfall effect.
 ## Notes
 
 - Both Task 3 & 4 use the SAME webpack config created in Task 1
-- **Pattern**: Put `"use client"` at root level → everything in server bundle
-  - All components still SSR on server (rendered to HTML)
-  - Lazy-loaded async components code-split into separate chunks
-  - Static content visible immediately (fully SSRed)
+- **Pattern**: Put `"use client"` at root level → all components become client components
+  - Components go into the **client bundle** (NOT RSC bundle)
+  - Static parts SSRed, but lazy-loaded components are **NOT SSRed**
+  - Only Suspense fallbacks (spinners) render on server for lazy components
   - Client-side fetch waterfall causes ~500-600ms LCP
 - Async components are imported via `lazy()` for code-splitting
 - Each async component has `useState` + `useEffect` for client-side data fetching
-- Performance difference (vs RSC) comes from client-side fetch waterfall (sequential requests on client)
+- Performance difference (vs RSC) comes from:
+  1. Lazy components NOT SSRed (spinners shown initially)
+  2. Client-side fetch waterfall (sequential API requests after hydration)
 - This task demonstrates traditional React SSR with lazy-loading (current standard)
