@@ -4,7 +4,7 @@
 import ReactOnRails from 'react-on-rails-pro';
 
 // Styles
-import '../stylesheets/application.css';
+// import '../stylesheets/application.css';
 
 // Set React on Rails options
 ReactOnRails.setOptions({
