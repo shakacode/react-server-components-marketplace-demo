@@ -1,6 +1,7 @@
 # Note: You must restart bin/shakapacker-dev-server for changes to take effect
 
 default: &default
+  javascript_transpiler: "babel"
   source_path: app/javascript
   source_entry_path: packs
   shakapacker_precompile: false
