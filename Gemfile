@@ -21,7 +21,7 @@ gem 'react_on_rails', '16.2.0.beta.20'
 gem 'react_on_rails_pro', '16.2.0.beta.20'
 
 # Shakapacker for webpack integration
-gem 'shakapacker', '~> 8.0'
+gem 'shakapacker', '~> 9.5'
 
 # JSON handling
 gem 'jbuilder'
