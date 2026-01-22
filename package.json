@@ -53,6 +53,8 @@
     "typescript": "^5.4.0",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.0",
-    "webpack-dev-server": "^5.0.0"
+    "webpack-dev-server": "^5.0.0",
+    "@swc/core": "^1.7.39",
+    "swc-loader": "^0.2.6"
   }
 }
