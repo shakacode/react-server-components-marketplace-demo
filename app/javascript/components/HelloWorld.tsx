@@ -1,6 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
+import { StatusBadge } from './restaurant/StatusBadge';
+import { RatingBadge } from './restaurant/RatingBadge';
+import { WaitTimeBadge } from './restaurant/WaitTimeBadge';
+import { SpecialsList } from './restaurant/SpecialsList';
 
 interface HelloWorldProps {
   name: string;
@@ -12,6 +16,24 @@ const HelloWorld: React.FC<HelloWorldProps> = ({ name }) => {
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
       <h1>Hello, {name}!</h1>
+      <StatusBadge status='closed' />
+      <StatusBadge status='open' />
+      <WaitTimeBadge minutes={20} />
+      <RatingBadge count={2} rating={3} />
+
+      <SpecialsList promotions={[
+        {
+          id: 1,
+          restaurant_id: 2,
+          title: "Title",
+          description: "Description",
+          discount_type: 'percentage',
+          discount_value: 22,
+          code: '222222',
+          starts_at: '222222',
+          ends_at: '33333333',
+        }
+      ]} />
       <p>React on Rails is working with TypeScript!</p>
       <p>Count: {count}</p>
       <button

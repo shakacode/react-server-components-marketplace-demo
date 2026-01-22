@@ -53,3 +53,6 @@ group :test do
   gem 'capybara'
   gem 'selenium-webdriver'
 end
+
+gem "pry", "~> 0.16.0"
+gem "pry-byebug", "~> 3.12"

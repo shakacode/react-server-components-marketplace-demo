@@ -1,4 +1,4 @@
-web: bundle exec rails server -p 3000
+# web: bundle exec rails server -p 3000
 webpack: bin/shakapacker-dev-server
 
 # Keep the JS fresh for server rendering. Remove if not server rendering

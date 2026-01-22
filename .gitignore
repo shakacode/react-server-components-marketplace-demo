@@ -97,3 +97,6 @@ tmp/cache/bootsnap*
 
 # Redis dump
 dump.rdb
+
+/app/assets/builds/*
+!/app/assets/builds/.keep
