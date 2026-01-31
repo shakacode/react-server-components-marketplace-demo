@@ -21,7 +21,7 @@ gem 'react_on_rails', '16.2.0.beta.20'
 gem 'react_on_rails_pro', '16.2.0.beta.20'
 
 # Shakapacker for webpack integration
-gem 'shakapacker', '~> 8.0'
+gem 'shakapacker', '~> 9.5'
 
 # JSON handling
 gem 'jbuilder'
@@ -37,6 +37,8 @@ group :development, :test do
   gem 'rspec-rails', '~> 6.1'
   gem 'factory_bot_rails'
   gem 'faker'
+  gem "pry", "~> 0.16.0"
+  gem "pry-byebug", "~> 3.12"
 end
 
 group :development do
@@ -50,6 +52,3 @@ group :test do
   gem 'capybara'
   gem 'selenium-webdriver'
 end
-
-gem "pry", "~> 0.16.0"
-gem "pry-byebug", "~> 3.12"
