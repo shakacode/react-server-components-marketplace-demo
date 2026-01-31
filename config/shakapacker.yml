@@ -1,5 +1,6 @@
 ---
 default:
+  precompile_hook: "rake react_on_rails:generate_packs"
   javascript_transpiler: swc
   source_path: app/javascript
   source_entry_path: packs
@@ -40,6 +41,7 @@ default:
   - ".jpeg"
   - ".jpg"
 development:
+  precompile_hook: "rake react_on_rails:generate_packs"
   javascript_transpiler: swc
   source_path: app/javascript
   source_entry_path: packs
@@ -72,6 +74,7 @@ development:
       watch:
         ignored: "**/node_modules/**"
 test:
+  precompile_hook: "rake react_on_rails:generate_packs"
   javascript_transpiler: swc
   source_path: app/javascript
   source_entry_path: packs
@@ -89,6 +92,7 @@ test:
   compile: true
   compiler_strategy: digest
 production:
+  precompile_hook: "rake react_on_rails:generate_packs"
   javascript_transpiler: swc
   source_path: app/javascript
   source_entry_path: packs

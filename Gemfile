@@ -37,6 +37,8 @@ group :development, :test do
   gem 'rspec-rails', '~> 6.1'
   gem 'factory_bot_rails'
   gem 'faker'
+  gem "pry", "~> 0.16.0"
+  gem "pry-byebug", "~> 3.12"
 end
 
 group :development do
@@ -50,6 +52,3 @@ group :test do
   gem 'capybara'
   gem 'selenium-webdriver'
 end
-
-gem "pry", "~> 0.16.0"
-gem "pry-byebug", "~> 3.12"
