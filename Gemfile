@@ -16,9 +16,6 @@ gem 'importmap-rails'
 gem 'turbo-rails'
 gem 'stimulus-rails'
 
-# Tailwind CSS
-gem 'tailwindcss-rails'
-
 # React on Rails - SAME VERSION for both gems
 gem 'react_on_rails', '16.2.0.beta.20'
 gem 'react_on_rails_pro', '16.2.0.beta.20'
@@ -53,3 +50,6 @@ group :test do
   gem 'capybara'
   gem 'selenium-webdriver'
 end
+
+gem "pry", "~> 0.16.0"
+gem "pry-byebug", "~> 3.12"
