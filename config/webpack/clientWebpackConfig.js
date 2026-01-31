@@ -1,6 +1,40 @@
 const { RSCWebpackPlugin } = require('react-on-rails-rsc/WebpackPlugin');
 const commonWebpackConfig = require('./commonWebpackConfig');
 
+// Override CSS Modules configuration to use v8-style default exports
+const overrideCssModulesConfig = (config) => {
+  // Find the CSS rule in the module rules
+  const cssRule = config.module.rules.find(
+    (rule) => rule.test && rule.test.toString().includes("css")
+  )
+
+  if (cssRule && cssRule.use) {
+    const cssLoaderUse = cssRule.use.find(
+      (use) => use.loader && use.loader.includes("css-loader")
+    )
+
+    if (cssLoaderUse) {
+      cssRule.use.push({
+        loader: "postcss-loader",
+        options: {
+          postcssOptions: {
+            plugins: [
+              [
+                "postcss-preset-env",
+                {
+                  // Options
+                },
+              ],
+            ],
+          },
+        },
+      })
+    }
+  }
+
+  return config
+}
+
 const configureClient = () => {
   const clientConfig = commonWebpackConfig();
 
@@ -18,7 +52,7 @@ const configureClient = () => {
     stream: false,
   };
 
-  return clientConfig;
+  return overrideCssModulesConfig(clientConfig);
 };
 
 module.exports = configureClient;
