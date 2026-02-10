@@ -1,33 +1,37 @@
-# Task 4: RSC Version
+# Task 4: RSC Version (V3)
 
 **Time**: 10-14 hours
 **Dependencies**: Task 1 (webpack config complete), Task 2 (Components & API complete)
-**Can Run Parallel With**: Task 3 (Traditional Version)
+**Can Run Parallel With**: Task 3 (Traditional Versions)
 
 ---
 
 ## Overview
 
-Build the React Server Components (RSC) + streaming version. This demonstrates how RSC dramatically improves Web Vitals by fetching all data server-side before rendering.
+Build the React Server Components (RSC) + streaming version of the restaurant search results page. This demonstrates how RSC with async props dramatically improves Web Vitals by fetching data server-side and streaming HTML as each piece resolves.
 
-**Key Principle**: Root component is an async function WITHOUT `"use client"` directive, which tells webpack:
-- ✅ Put this in the RSC bundle (server components)
+The page displays a **search results grid** with 4 restaurant cards, each with 5 async data widgets — identical layout to V1 and V2, but with fundamentally different data fetching.
+
+**Key Principle**: Root component is an async function WITHOUT `"use client"` directive:
+- ✅ Put in the RSC bundle (server components)
 - ✅ SSRed via RSC pipeline (server-side async rendering)
-- ✅ **Entire page is SSRed** - both server components AND any client components lower in the tree
+- ✅ Data fetched server-side via `getReactOnRailsAsyncProp` (received as a **prop**, NOT imported)
 - ✅ Streamed to browser as Suspense boundaries resolve
-- ✅ All data fetched server-side via getReactOnRailsAsyncProp
 - ✅ Client components CAN exist lower in tree (with `"use client"` directive) for interactivity
-- ❌ No `"use client"` at root level (uses RSC, not traditional SSR)
+- ❌ No `"use client"` at root level
 
-**Pattern**:
-1. Root component is async function (no `"use client"`)
-2. All nested async components await data before rendering
-3. Data fetched server-side via getReactOnRailsAsyncProp
-4. No useState or useEffect (React hooks forbidden in server components)
-5. `stream_react_component` helper streams HTML as Suspense boundaries resolve
-6. Browser receives complete HTML with no client-side fetch waterfall
+**How Async Props Work** (react_on_rails v16.3+):
+1. Rails view uses `stream_react_component_with_async_props` helper with an `emit` block
+2. The emit block calls `emit.call("prop_name", value)` to send data to the Node renderer
+3. The React component receives `getReactOnRailsAsyncProp` as a **prop** (injected by the framework)
+4. Async server components call `await getReactOnRailsAsyncProp("prop_name")` to get the data
+5. Each emit resolves the corresponding promise, allowing that Suspense boundary to render
+6. HTML is streamed to the browser as each boundary resolves
 
-**Expected Performance**: LCP ~200-250ms, CLS ~0.02
+**Expected Performance** (with network throttling):
+- TTFB: ~50-100ms (streaming starts immediately, data fetched in parallel on server)
+- LCP: ~200-350ms (all data streamed server-side)
+- CLS: ~0.02-0.08 (Suspense fallbacks replaced with streamed content — brief but present)
 
 ---
 
@@ -52,195 +56,170 @@ Create `app/javascript/components/search/SearchPageRSC.tsx`:
 
 ```typescript
 // No "use client" directive!
-// This means: put in RSC bundle (server components), not server bundle (traditional SSR)
+// This means: put in RSC bundle (server components), not client bundle
 
 import React, { Suspense } from 'react';
-import AsyncStatus from '../async/rsc/AsyncStatus';
-import AsyncWaitTime from '../async/rsc/AsyncWaitTime';
-import AsyncSpecials from '../async/rsc/AsyncSpecials';
-import AsyncTrending from '../async/rsc/AsyncTrending';
-import AsyncRating from '../async/rsc/AsyncRating';
-import Spinner from '../shared/Spinner';
+import { RestaurantCardHeader } from '../restaurant/RestaurantCardHeader';
+import { RestaurantCardFooter } from '../restaurant/RestaurantCardFooter';
+import { CardWidgetsSkeleton } from '../shared/CardWidgetsSkeleton';
+import AsyncRestaurantWidgetsRSC from '../restaurant/AsyncRestaurantWidgetsRSC';
 
-interface Props {
-  restaurant_id: number;
+interface Restaurant {
+  id: number;
+  name: string;
+  cuisine_type: string;
+  city: string;
+  state: string;
+  image_url: string;
+  latitude: number;
+  longitude: number;
+  average_rating: number;
+  review_count: number;
 }
 
-// This is an async server component (RSC)
-// No "use client" = goes in RSC bundle
-async function SearchPageRSC({ restaurant_id }: Props) {
+interface Props {
+  restaurants: Restaurant[];
+  getReactOnRailsAsyncProp: (propName: string) => Promise<any>;
+}
+
+// Async server component (RSC) — no hooks allowed
+export default async function SearchPageRSC({ restaurants, getReactOnRailsAsyncProp }: Props) {
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-3xl font-bold mb-6">Restaurant Details</h1>
+      <h1 className="text-3xl font-bold mb-6">Restaurant Search — RSC Streaming</h1>
+      <p className="text-gray-500 mb-4">Data streamed from server as each piece resolves.</p>
 
-      {/* Static content */}
-      <RestaurantCardHeader restaurantId={restaurant_id} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {restaurants.map((restaurant) => (
+          <div key={restaurant.id} className="bg-white rounded-lg shadow-md p-4">
+            {/* Static content — rendered immediately */}
+            <RestaurantCardHeader restaurant={restaurant} />
 
-      {/* Dynamic content - all data fetched SERVER-SIDE */}
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-4">
-          <Suspense fallback={<Spinner label="Checking status..." />}>
-            <AsyncStatus restaurantId={restaurant_id} />
-          </Suspense>
+            {/* Async widgets — streamed as data resolves on server */}
+            <Suspense fallback={<CardWidgetsSkeleton />}>
+              <AsyncRestaurantWidgetsRSC
+                restaurantId={restaurant.id}
+                getReactOnRailsAsyncProp={getReactOnRailsAsyncProp}
+              />
+            </Suspense>
 
-          <Suspense fallback={<Spinner label="Getting wait time..." />}>
-            <AsyncWaitTime restaurantId={restaurant_id} />
-          </Suspense>
-
-          <Suspense fallback={<Spinner label="Loading specials..." />}>
-            <AsyncSpecials restaurantId={restaurant_id} />
-          </Suspense>
-
-          <Suspense fallback={<Spinner label="Finding trending items..." />}>
-            <AsyncTrending restaurantId={restaurant_id} />
-          </Suspense>
-
-          <Suspense fallback={<Spinner label="Fetching ratings..." />}>
-            <AsyncRating restaurantId={restaurant_id} />
-          </Suspense>
-        </div>
+            <RestaurantCardFooter restaurant={restaurant} />
+          </div>
+        ))}
       </div>
     </div>
   );
 }
-
-export default SearchPageRSC;
 ```
 
-**Key difference from Task 3**:
-- ❌ No "use client" directive
-- ✅ Async function (server component pattern)
-- ✅ Put in RSC bundle (not server bundle)
+**Key differences from V2 (Task 3)**:
+- ❌ No `"use client"` directive — component is in RSC bundle
+- ✅ `async function` (server component pattern)
+- ✅ `getReactOnRailsAsyncProp` received as a **prop** (injected by react_on_rails)
+- ✅ Data fetched on server, streamed to browser
 
 ---
 
-### 3. Async Server Components
+### 3. Async Server Component for Widgets
 
-Create `app/javascript/components/async/rsc/AsyncStatus.tsx`:
+Create `app/javascript/components/restaurant/AsyncRestaurantWidgetsRSC.tsx`:
 
 ```typescript
+// No "use client" — this is a server component
 import React from 'react';
-import StatusBadge from '../../restaurant/StatusBadge';
-import { getReactOnRailsAsyncProp } from 'react-on-rails-pro';
+import { StatusBadge } from './StatusBadge';
+import { WaitTimeBadge } from './WaitTimeBadge';
+import { RatingBadge } from './RatingBadge';
+import { SpecialsList } from './SpecialsList';
+import { TrendingItems } from './TrendingItems';
 
 interface Props {
   restaurantId: number;
+  getReactOnRailsAsyncProp: (propName: string) => Promise<any>;
 }
 
-interface StatusData {
-  status: 'open' | 'closed' | 'custom_hours';
-  timestamp: number;
-}
+// Server component — awaits data from Rails via async props
+export default async function AsyncRestaurantWidgetsRSC({
+  restaurantId,
+  getReactOnRailsAsyncProp,
+}: Props) {
+  // Each await resolves when Rails emits the corresponding prop
+  // The prop names match the keys used in the Rails view's emit block
+  const propName = `restaurant_${restaurantId}_widgets`;
+  const data = await getReactOnRailsAsyncProp(propName);
 
-// Server component - async function, no hooks allowed
-async function AsyncStatus({ restaurantId }: Props) {
-  // Data is fetched on the SERVER using getReactOnRailsAsyncProp
-  // getReactOnRailsAsyncProp is provided by react-on-rails-pro
-  // It calls the Rails helper method you define
-  const status = await getReactOnRailsAsyncProp<StatusData>(
-    'status',
-    { restaurantId }
+  return (
+    <div className="space-y-3 mt-4">
+      <div className="flex items-center gap-3">
+        <StatusBadge status={data.status} />
+        <WaitTimeBadge minutes={data.wait_time} />
+      </div>
+      <RatingBadge rating={data.average_rating} count={data.review_count} />
+      <SpecialsList promotions={data.specials} />
+      <TrendingItems items={data.trending} />
+    </div>
   );
-
-  // Component renders with data already resolved (no spinners)
-  return <StatusBadge status={status.status} />;
 }
-
-export default AsyncStatus;
 ```
 
-Create similar async server components:
-- `AsyncWaitTime.tsx` - Awaits `getReactOnRailsAsyncProp('wait_time', ...)`
-- `AsyncSpecials.tsx` - Awaits `getReactOnRailsAsyncProp('specials', ...)`
-- `AsyncTrending.tsx` - Awaits `getReactOnRailsAsyncProp('trending', ...)`
-- `AsyncRating.tsx` - Awaits `getReactOnRailsAsyncProp('rating', ...)`
+**Key**: No `useState`, no `useEffect`, no `fetch()`. Data comes from `getReactOnRailsAsyncProp` which resolves when Rails emits the prop via the view's emit block.
 
 ---
 
-### 4. Rails View
+### 4. Rails View (with Async Props Emit Block)
 
 Create `app/views/restaurants/search_rsc.html.erb`:
 
 ```erb
-<div id="search-page-rsc-app">
-  <%= stream_react_component(
-    "SearchPageRSC",
-    { restaurant_id: @restaurant.id }
-  ) %>
-</div>
+<%= stream_react_component_with_async_props("SearchPageRSC",
+      props: { restaurants: @restaurants },
+      html_options: { id: "search-rsc-app" }) do |emit|
 
-<script>
-  // Collect Web Vitals (same as traditional version)
-  import { getCLS, getFID, getFCP, getLCP, getTTFB } from 'web-vitals';
+  # Fetch and emit widget data for each restaurant
+  # Each emit.call resolves the corresponding getReactOnRailsAsyncProp promise
+  @restaurants.each do |restaurant|
+    widget_data = {
+      status: restaurant.current_status,
+      wait_time: restaurant.current_wait_time,
+      average_rating: restaurant.average_rating,
+      review_count: restaurant.review_count,
+      specials: restaurant.active_promotions.map { |p|
+        { id: p.id, title: p.title, description: p.description,
+          discount_type: p.discount_type, discount_value: p.discount_value,
+          code: p.code, ends_at: p.ends_at.iso8601 }
+      },
+      trending: restaurant.trending_items.map { |item|
+        { id: item.id, name: item.name, category: item.category,
+          price: item.price.to_f, description: item.description }
+      },
+    }
 
-  getCLS(metric => sendMetric(metric));
-  getFID(metric => sendMetric(metric));
-  getFCP(metric => sendMetric(metric));
-  getLCP(metric => sendMetric(metric));
-  getTTFB(metric => sendMetric(metric));
-
-  function sendMetric(metric) {
-    fetch('/api/performance_metrics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: metric.name,
-        value: metric.value,
-        page_type: 'rsc',
-        timestamp: new Date().toISOString(),
-      }),
-    });
-  }
-</script>
+    emit.call("restaurant_#{restaurant.id}_widgets", widget_data)
+  end
+%>
 ```
+
+**Key**: The emit block is where all data fetching happens on the Rails side. Each `emit.call` sends data to the Node renderer, resolving the matching `getReactOnRailsAsyncProp` promise.
+
+**Important**: There is NO separate AsyncProps Ruby module. The emit block in the view IS the data fetching layer.
 
 ---
 
-### 5. Rails Async Prop Helpers
+### 5. Rails Controller
 
-Create `app/javascript/helpers/async_props.rb` (in Rails app):
+Already implemented in `app/controllers/restaurants_controller.rb`:
 
 ```ruby
-module AsyncProps
-  def self.status(restaurant_id:)
-    restaurant = Restaurant.find(restaurant_id)
-    {
-      status: restaurant.current_status,
-      timestamp: Time.current.to_i,
-    }
-  end
+class RestaurantsController < ApplicationController
+  include ReactOnRailsPro::RSCPayloadRenderer
+  include ReactOnRailsPro::AsyncRendering
 
-  def self.wait_time(restaurant_id:)
-    restaurant = Restaurant.find(restaurant_id)
-    {
-      wait_time: restaurant.current_wait_time,
-      timestamp: Time.current.to_i,
-    }
-  end
+  enable_async_react_rendering only: [:search_rsc]
 
-  def self.specials(restaurant_id:)
-    restaurant = Restaurant.find(restaurant_id)
-    {
-      promotions: restaurant.active_promotions,
-      timestamp: Time.current.to_i,
-    }
-  end
-
-  def self.trending(restaurant_id:)
-    restaurant = Restaurant.find(restaurant_id)
-    {
-      items: restaurant.trending_items,
-      timestamp: Time.current.to_i,
-    }
-  end
-
-  def self.rating(restaurant_id:)
-    restaurant = Restaurant.find(restaurant_id)
-    {
-      average_rating: restaurant.average_rating,
-      review_count: restaurant.review_count,
-      timestamp: Time.current.to_i,
-    }
+  # V3: RSC Streaming — send basic info, server components fetch async data
+  def search_rsc
+    @restaurants = fetch_restaurants_basic
+    stream_view_containing_react_components(template: "restaurants/search_rsc")
   end
 end
 ```
@@ -249,139 +228,148 @@ end
 
 ### 6. Routes Configuration
 
-Add to `config/routes.rb`:
+Already configured in `config/routes.rb`:
 
 ```ruby
-get '/search/rsc', to: 'restaurants#search_rsc'
+get '/search/rsc', to: 'restaurants#search_rsc'  # V3: RSC streaming
 ```
 
 ---
 
-### 7. Rails Controller
+## How Async Props Work (react_on_rails v16.3+)
 
-Add to `app/controllers/restaurants_controller.rb`:
+### Architecture
 
-```ruby
-def search_rsc
-  @restaurant = Restaurant.find(params[:id] || 1)
-end
 ```
+Browser ←── HTTP/2 Stream ──→ Node Renderer ←── Bidirectional Stream ──→ Rails Server
+                                    ↑
+                          AsyncPropsManager
+                          (resolves promises as
+                           Rails emits props)
+```
+
+### Flow
+
+```
+1. Browser requests /search/rsc
+2. Rails controller calls stream_view_containing_react_components
+3. View calls stream_react_component_with_async_props with initial props + emit block
+4. Node renderer starts rendering SearchPageRSC with initial props + getReactOnRailsAsyncProp function
+5. SearchPageRSC renders restaurant cards, each with <Suspense fallback={<Skeleton/>}>
+6. AsyncRestaurantWidgetsRSC calls await getReactOnRailsAsyncProp("restaurant_1_widgets")
+   → Returns a Promise that the AsyncPropsManager holds
+7. Rails emit block runs: emit.call("restaurant_1_widgets", { status: "open", ... })
+   → Data sent to Node renderer, promise resolves
+8. Suspense boundary resolves, HTML streamed to browser
+9. Repeat for each restaurant
+10. Browser receives streamed HTML chunks, replacing skeletons with content
+```
+
+### getReactOnRailsAsyncProp — Important Details
+
+- **NOT an import** — it is injected as a **prop** by the react_on_rails framework
+- Returns a `Promise<T>` that resolves when the corresponding `emit.call` fires on the Rails side
+- The prop name string (e.g., `"restaurant_1_widgets"`) must match between the React `await` call and the Rails `emit.call`
+- Multiple async props can resolve independently, enabling progressive streaming
 
 ---
 
 ## Success Criteria
 
-- [ ] `/search/rsc` page loads and renders
-- [ ] All data fetched on SERVER (no client-side API calls)
-- [ ] HTML streamed to browser as Suspense boundaries resolve
-- [ ] Spinners visible only during server fetch (not on client)
+- [ ] `/search/rsc` page loads and renders with streaming
+- [ ] All data fetched on SERVER (no client-side API calls in DevTools Network)
+- [ ] HTML streamed to browser as each restaurant's data resolves
+- [ ] Brief skeleton fallbacks visible during streaming (~100-200ms)
+- [ ] Skeletons replaced with content as streamed HTML arrives
 - [ ] No hydration errors
-- [ ] Web Vitals collected: LCP ~200-250ms, CLS ~0.02
-- [ ] 59% faster LCP than traditional version (550ms → 225ms)
-- [ ] 83% less layout shift than traditional (0.12 → 0.02)
+- [ ] CLS: ~0.02-0.08 (minimal shifts from skeleton replacement)
+- [ ] LCP: ~200-350ms (dramatically faster than V1 and V2)
 - [ ] Console shows no errors or warnings
 
 ---
 
 ## Key Technical Details
 
-### Async Server Components (RSC Constraint)
+### Server Components (RSC Constraints)
 
 Server components **CANNOT**:
 - Use `useState`, `useEffect`, `useCallback`, etc. (React hooks)
 - Use `useContext` (Context API)
 - Use browser APIs (localStorage, window, etc.)
-- Be marked with "use client"
+- Be marked with `"use client"`
 
 Server components **CAN**:
 - Be declared as `async function`
-- Await data fetching
-- Access Rails helpers and models
-- Render pure display components
+- Await data via `getReactOnRailsAsyncProp`
+- Import and render display components
+- Import and render client components (with `"use client"`) for interactivity
 
-### getReactOnRailsAsyncProp
-
-This is provided by `react-on-rails-pro`. It:
-1. Receives a key name (e.g., 'status')
-2. Receives props (e.g., { restaurantId: 1 })
-3. Calls the Rails async prop helper (AsyncProps.status)
-4. Returns the resolved data
-
-### Data Fetching Flow (RSC)
+### Why RSC Streaming Is Faster Than V1 and V2
 
 ```
-1. Request arrives at Rails server
-2. SearchPageRSC component starts rendering
-3. AsyncStatus component awaits getReactOnRailsAsyncProp('status', ...)
-4. Rails fetches status (100-150ms for wait_time)
-5. Data returned to component
-6. Component renders <StatusBadge status={...} />
-7. Browser receives streamed HTML with resolved data
-8. No client-side fetch waterfall
-9. Total LCP: ~200-250ms (all data fetched server-side)
+V1 (Full SSR):       V2 (Client):         V3 (RSC Streaming):
+─────────────        ─────────────        ──────────────────
+0ms: Request         0ms: Request         0ms: Request
+                     100ms: HTML (basic)  50ms: Stream starts (headers + skeletons)
+                     200ms: Hydrate       100ms: First restaurant data streamed
+                     250ms: fetch() ×20   150ms: Second restaurant streamed
+                     500ms: Batch 1       200ms: Third restaurant streamed
+                     650ms: Batch 2       250ms: Fourth restaurant streamed
+1200ms: HTML (all)   800ms: All done      300ms: All done (LCP)
+1400ms: LCP
 ```
 
-### vs Traditional (Task 3)
+- **vs V1**: RSC streams incrementally; V1 waits for ALL queries before sending anything
+- **vs V2**: RSC fetches on server (fast DB queries, no network round trips); V2 fetches from browser (HTTP overhead × 20)
+- **vs Both**: RSC can run queries in parallel on the server (each emit.call is independent)
 
-```
-Traditional:
-1. Server renders SearchPage
-2. Browser downloads JS bundles
-3. React hydrates
-4. SearchPageContent mounts
-5. useEffect sends fetch() for status
-6. Wait for 100-150ms
-7. Spinners replaced with content
-8. Total LCP: ~500-600ms
-```
+### CLS in RSC Streaming
 
-### Streaming Benefit
-
-- **No waterfall**: All queries run in parallel on server (~150-200ms total)
-- **Early hints**: Browser starts rendering before all data ready
-- **No hydration mismatch**: Server data matches rendered HTML
+RSC streaming DOES have brief CLS (~0.02-0.08) because:
+- Initial HTML includes skeleton fallbacks from `<Suspense fallback={<CardWidgetsSkeleton />}>`
+- When streamed data arrives (~100-200ms later), skeletons are replaced with actual content
+- The CardWidgetsSkeleton component is designed to match widget dimensions, minimizing shift
+- Duration is much shorter than V2 (~100-200ms vs ~500-600ms)
 
 ---
 
 ## Troubleshooting
 
 **Problem**: `getReactOnRailsAsyncProp is not defined`
-- **Solution**: Ensure react-on-rails-pro is installed and configured
+- **Solution**: Ensure it's received as a prop, not imported. Check that the view uses `stream_react_component_with_async_props` (not `stream_react_component`)
 
-**Problem**: Server component hangs (slow response)
-- **Solution**: Check query latency, especially wait_time query (should be 100-150ms)
+**Problem**: Props never resolve (infinite skeleton)
+- **Solution**: Check that emit.call prop names match getReactOnRailsAsyncProp names exactly
+
+**Problem**: Server component hangs
+- **Solution**: Check query latency, ensure emit block completes, check Node renderer logs
 
 **Problem**: Hydration mismatch error
-- **Solution**: Ensure no hooks in async server components, no "use client" directive
-
-**Problem**: Spinners never disappear on client
-- **Solution**: This is expected for RSC - data is resolved server-side, spinners shown briefly during streaming
+- **Solution**: Ensure no hooks in server components, verify no `"use client"` on RSC components
 
 ---
 
 ## Files Created/Modified
 
-- ✅ `app/javascript/entries/search_rsc.tsx`
-- ✅ `app/javascript/components/search/SearchPageRSC.tsx`
-- ✅ `app/javascript/components/async/rsc/AsyncStatus.tsx`
-- ✅ `app/javascript/components/async/rsc/AsyncWaitTime.tsx`
-- ✅ `app/javascript/components/async/rsc/AsyncSpecials.tsx`
-- ✅ `app/javascript/components/async/rsc/AsyncTrending.tsx`
-- ✅ `app/javascript/components/async/rsc/AsyncRating.tsx`
-- ✅ `app/views/restaurants/search_rsc.html.erb`
-- ✅ `app/javascript/helpers/async_props.rb` (Rails helper)
-- ✅ `app/controllers/restaurants_controller.rb` (update)
+- ✅ `app/javascript/entries/search_rsc.tsx` (webpack entry point)
+- ✅ `app/javascript/components/search/SearchPageRSC.tsx` (root server component)
+- ✅ `app/javascript/components/restaurant/AsyncRestaurantWidgetsRSC.tsx` (async server component)
+- ✅ `app/views/restaurants/search_rsc.html.erb` (Rails view with emit block)
+- ✅ `app/controllers/restaurants_controller.rb` (already implemented)
+- ✅ `config/routes.rb` (already configured)
 
 ---
 
 ## Notes
 
-- Both Task 3 & 4 use the SAME webpack config created in Task 1
-- Only the component patterns and Rails helpers differ
-- **Key difference from Task 3**:
-  - Task 3 (Traditional): `"use client"` at root → client bundle → lazy components NOT SSRed → client-side fetch
-  - Task 4 (RSC): No `"use client"` at root → RSC bundle → entire page SSRed (including any client components) → server-side fetch
-- RSC pages CAN have client components (with `"use client"` directive) lower in the tree for interactivity (state, effects, context)
-- Client components in RSC pages are still SSRed, unlike lazy-loaded components in traditional pages
-- Performance difference comes from data fetching timing on server vs client
-- This task demonstrates React 19 Server Components (future best practice)
+- Tasks 3 & 4 use the SAME webpack config created in Task 1
+- Same display components shared across all three versions
+- **Key differences from Task 3**:
+  - Task 3 V1 (Full SSR): All data fetched sequentially on server → slow TTFB, no CLS
+  - Task 3 V2 (Client): `"use client"` at root → client bundle → lazy components NOT SSRed → client-side fetch waterfall
+  - Task 4 V3 (RSC): No `"use client"` at root → RSC bundle → async props with emit block → server-side streaming
+- `getReactOnRailsAsyncProp` is a PROP (injected by framework), NOT an import
+- `stream_react_component_with_async_props` (NOT `stream_react_component`) is the view helper
+- No separate AsyncProps Ruby module — the emit block in the view IS the data fetching layer
+- Requires react_on_rails v16.3+ for async props support
+- Performance differences are best demonstrated with Chrome DevTools network throttling
