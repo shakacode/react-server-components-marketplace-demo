@@ -1,4 +1,6 @@
 import { Restaurant } from '../../types';
+import { RatingBadge } from './RatingBadge';
+import { getDistance } from '../../utils/distance';
 
 interface Props {
   restaurant: Restaurant;

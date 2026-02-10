@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2024_12_20_000008) do
+ActiveRecord::Schema[7.2].define(version: 2026_02_10_112154) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -106,6 +106,7 @@ ActiveRecord::Schema[7.2].define(version: 2024_12_20_000008) do
     t.integer "review_count", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "image_url"
     t.index ["average_rating"], name: "index_restaurants_on_average_rating"
     t.index ["city"], name: "index_restaurants_on_city"
     t.index ["cuisine_type"], name: "index_restaurants_on_cuisine_type"

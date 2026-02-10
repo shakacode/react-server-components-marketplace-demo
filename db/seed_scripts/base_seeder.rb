@@ -33,6 +33,7 @@ class BaseSeeder
             phone: format('(%03d) %03d-%04d', rand(200..999), rand(200..999), rand(1000..9999)),
             average_rating: rand(3.0..5.0).round(2),
             review_count: rand(10..500),
+            image_url: "https://picsum.photos/seed/restaurant-#{idx + 1}/400/300",
             created_at: Time.current,
             updated_at: Time.current
           }
