@@ -7,9 +7,10 @@ Rails.application.routes.draw do
   root 'home#index'
   get '/rsc' => 'home#rsc'
 
-  # Search routes (Tasks 3 & 4)
-  get '/search', to: 'restaurants#search'
-  get '/search/rsc', to: 'restaurants#search_rsc'
+  # Search routes — three versions of the same page
+  get '/search/ssr', to: 'restaurants#search_ssr'       # V1: All data fetched on server, returned at once
+  get '/search/client', to: 'restaurants#search_client'  # V2: Loadable components, client-side fetch
+  get '/search/rsc', to: 'restaurants#search_rsc'        # V3: RSC streaming
 
   # Dashboard route (Task 5)
   get '/dashboard', to: 'dashboard#index'

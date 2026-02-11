@@ -1,5 +1,8 @@
 const { RSCWebpackPlugin } = require('react-on-rails-rsc/WebpackPlugin');
+const LoadablePlugin = require('@loadable/webpack-plugin');
 const commonWebpackConfig = require('./commonWebpackConfig');
+
+const isHMR = process.env.HMR;
 
 // Override CSS Modules configuration to use v8-style default exports
 const overrideCssModulesConfig = (config) => {
@@ -45,6 +48,10 @@ const configureClient = () => {
   delete clientConfig.entry['server-bundle'];
 
   clientConfig.plugins.push(new RSCWebpackPlugin({ isServer: false }));
+
+  if (!isHMR) {
+    clientConfig.plugins.unshift(new LoadablePlugin({ filename: 'loadable-stats.json', writeToDisk: true }));
+  }
 
   clientConfig.resolve.fallback = {
     fs: false,

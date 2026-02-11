@@ -1,4 +1,4 @@
-# Task 3: Traditional Version
+# Task 3: Traditional Versions (V1 + V2)
 
 **Time**: 10-14 hours
 **Dependencies**: Task 1 (webpack config complete), Task 2 (Components & API complete)
@@ -8,232 +8,300 @@
 
 ## Overview
 
-Build the traditional React SSR with client-side data fetching version.
+Build two traditional (non-RSC) versions of the restaurant search results page to compare against the RSC streaming version (Task 4).
 
-**Key Principle**: Use `"use client"` at the root level. This makes ALL components in the tree become **client components** that go into the **client bundle** (not the RSC bundle).
+The page displays a **search results grid** with 4 restaurant cards, each showing static info (name, image, cuisine, location) and 5 async data widgets (status, wait time, rating, specials, trending items).
 
+### V1: Full Server SSR (`/search/ssr`)
+
+All data is fetched on the Rails server **sequentially** before the page is returned. The browser receives a complete HTML page with all data already rendered — no spinners, no client-side fetching.
+
+- Rails controller fetches ALL data for ALL restaurants (status, wait time, specials, trending, rating)
+- Sequential Ruby `map` blocks mean each restaurant's queries run one after another
+- With 4 restaurants × 5 queries each = ~20 sequential queries
+- Total server time: ~1200-1500ms before first byte
+- `react_component` renders the full page with all data as props
+- **Result**: Slow TTFB, but once HTML arrives everything is visible immediately
+
+**Expected Performance** (with network throttling):
+- TTFB: ~1200-1500ms (waiting for all sequential queries)
+- LCP: ~1300-1600ms
+- CLS: ~0.00 (no layout shifts — all content arrives at once)
+
+### V2: Client Components + Loadable (`/search/client`)
+
+Only basic restaurant info is fetched on the server. The 5 async widgets per card are lazy-loaded client components that fetch their own data via `useEffect` + `fetch()` after hydration.
+
+- **Key Principle**: Use `"use client"` at the root level. This makes ALL components in the tree become **client components** that go into the **client bundle** (not the RSC bundle).
 - ✅ Root component: `"use client"` directive at the top
 - ✅ All components underneath: become client components (can use hooks, state, effects)
-- ✅ Components go into the client bundle, NOT the RSC bundle
-- ✅ Static parts: SSRed on server
-- ✅ Lazy-loaded components: **NOT SSRed** - only their Suspense fallbacks (spinners) render on server
+- ✅ Static parts (card headers): SSRed on server
+- ✅ Lazy-loaded widget components: **NOT SSRed** — only their Suspense fallbacks (skeletons) render on server
 - ✅ Data fetches: client-side via useEffect/fetch (after hydration)
+- Browser makes up to 20 API calls (4 restaurants × 5 endpoints), limited by browser's 6-connection-per-domain limit
 
-**Pattern**:
-1. Root component has `"use client"` directive
-2. All imported components become client components (client bundle)
-3. Use lazy() to code-split async components
-4. Lazy-loaded components are NOT SSRed - only their fallbacks render on server
-5. After hydration, lazy components load and useEffect fires API requests
-6. Spinners replaced with content when data arrives
-7. **Result**: 500-600ms LCP with client-side fetch waterfall
-
-**Expected Performance**: LCP ~500-600ms, CLS ~0.10-0.15
+**Expected Performance** (with network throttling):
+- TTFB: ~100-200ms (only basic restaurant data fetched on server)
+- LCP: ~600-800ms (waiting for client-side fetch waterfall)
+- CLS: ~0.10-0.15 (skeleton placeholders replaced with content)
 
 ---
 
 ## Deliverables
 
-### 1. Entry Point
+### 1. V1: Full Server SSR Page
 
-Create `app/javascript/entries/search.tsx`:
+#### Rails View
 
-```typescript
-import React from 'react';
-import SearchPage from '../components/search/SearchPage';
+Create `app/views/restaurants/search_ssr.html.erb`:
 
-export default SearchPage;
+```erb
+<%= react_component("SearchPageSSR", props: { restaurant_data: @restaurant_data }, prerender: true) %>
 ```
 
----
+#### Page Component
 
-### 2. Root Component (with "use client")
-
-Create `app/javascript/components/search/SearchPage.tsx`:
+Create `app/javascript/components/search/SearchPageSSR.tsx`:
 
 ```typescript
-"use client";  // ← Makes this and ALL imported components into client components (client bundle)
+'use client';
 
-import React, { Suspense, lazy } from 'react';
-import RestaurantCardHeader from '../restaurant/RestaurantCardHeader';
-import Spinner from '../shared/Spinner';
+import React from 'react';
+import { RestaurantCardHeader } from '../restaurant/RestaurantCardHeader';
+import { RestaurantCardFooter } from '../restaurant/RestaurantCardFooter';
+import { StatusBadge } from '../restaurant/StatusBadge';
+import { WaitTimeBadge } from '../restaurant/WaitTimeBadge';
+import { RatingBadge } from '../restaurant/RatingBadge';
+import { SpecialsList } from '../restaurant/SpecialsList';
+import { TrendingItems } from '../restaurant/TrendingItems';
 
-// Lazy-loaded components - these are NOT SSRed, only their fallbacks are
-const AsyncStatus = lazy(() => import('../async/traditional/AsyncStatus'));
-const AsyncWaitTime = lazy(() => import('../async/traditional/AsyncWaitTime'));
-const AsyncSpecials = lazy(() => import('../async/traditional/AsyncSpecials'));
-const AsyncTrending = lazy(() => import('../async/traditional/AsyncTrending'));
-const AsyncRating = lazy(() => import('../async/traditional/AsyncRating'));
-
-interface Props {
-  restaurant_id: number;
+interface RestaurantData {
+  id: number;
+  name: string;
+  cuisine_type: string;
+  city: string;
+  state: string;
+  image_url: string;
+  latitude: number;
+  longitude: number;
+  average_rating: number;
+  review_count: number;
+  status: string;
+  wait_time: number;
+  specials: Promotion[];
+  trending: MenuItem[];
 }
 
-export default function SearchPage({ restaurant_id }: Props) {
+interface Props {
+  restaurant_data: RestaurantData[];
+}
+
+export default function SearchPageSSR({ restaurant_data }: Props) {
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-3xl font-bold mb-6">Restaurant Details</h1>
+      <h1 className="text-3xl font-bold mb-6">Restaurant Search — Full Server SSR</h1>
+      <p className="text-gray-500 mb-4">All data fetched on server sequentially before page is returned.</p>
 
-      {/* Static content - SSRed on server */}
-      <RestaurantCardHeader restaurantId={restaurant_id} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {restaurant_data.map((restaurant) => (
+          <div key={restaurant.id} className="bg-white rounded-lg shadow-md p-4">
+            <RestaurantCardHeader restaurant={restaurant} />
 
-      {/* Lazy-loaded content - NOT SSRed, only spinners render on server */}
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-4">
-          <Suspense fallback={<Spinner label="Checking status..." />}>
-            <AsyncStatus restaurantId={restaurant_id} />
-          </Suspense>
+            {/* All widgets rendered with data — no spinners */}
+            <div className="space-y-3 mt-4">
+              <div className="flex items-center gap-3">
+                <StatusBadge status={restaurant.status} />
+                <WaitTimeBadge minutes={restaurant.wait_time} />
+              </div>
+              <RatingBadge rating={restaurant.average_rating} count={restaurant.review_count} />
+              <SpecialsList promotions={restaurant.specials} />
+              <TrendingItems items={restaurant.trending} />
+            </div>
 
-          <Suspense fallback={<Spinner label="Getting wait time..." />}>
-            <AsyncWaitTime restaurantId={restaurant_id} />
-          </Suspense>
-
-          <Suspense fallback={<Spinner label="Loading specials..." />}>
-            <AsyncSpecials restaurantId={restaurant_id} />
-          </Suspense>
-
-          <Suspense fallback={<Spinner label="Finding trending items..." />}>
-            <AsyncTrending restaurantId={restaurant_id} />
-          </Suspense>
-
-          <Suspense fallback={<Spinner label="Fetching ratings..." />}>
-            <AsyncRating restaurantId={restaurant_id} />
-          </Suspense>
-        </div>
+            <RestaurantCardFooter restaurant={restaurant} />
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 ```
 
-**Key**: `"use client"` at root level makes all components become client components (go into client bundle, NOT RSC bundle). Static parts are SSRed, but lazy-loaded components are NOT SSRed - only their Suspense fallbacks (spinners) render on the server.
+**Key**: All data is passed as props from Rails. No client-side fetching. The page is slow to arrive (TTFB) but complete when it does.
 
 ---
 
-### 3. Lazy-Loaded Async Components (Code-Split)
+### 2. V2: Client Components + Loadable Page
 
-Create individual async components in separate files. The `lazy()` imports in SearchPage.tsx (from section 2) code-split each component into its own chunk.
+#### Rails View
 
-Create `app/javascript/components/async/traditional/AsyncStatus.tsx`:
+Create `app/views/restaurants/search_client.html.erb`:
+
+```erb
+<%= react_component("SearchPageClient", props: { restaurants: @restaurants }, prerender: true) %>
+```
+
+#### Page Component
+
+Create `app/javascript/components/search/SearchPageClient.tsx`:
+
+```typescript
+'use client';  // ← Makes this and ALL imported components into client components (client bundle)
+
+import React, { Suspense, lazy } from 'react';
+import { RestaurantCardHeader } from '../restaurant/RestaurantCardHeader';
+import { RestaurantCardFooter } from '../restaurant/RestaurantCardFooter';
+import { CardWidgetsSkeleton } from '../shared/CardWidgetsSkeleton';
+
+// Lazy-loaded widget component — NOT SSRed, only its fallback is
+const AsyncRestaurantWidgets = lazy(() => import('../restaurant/AsyncRestaurantWidgets'));
+
+interface Restaurant {
+  id: number;
+  name: string;
+  cuisine_type: string;
+  city: string;
+  state: string;
+  image_url: string;
+  latitude: number;
+  longitude: number;
+  average_rating: number;
+  review_count: number;
+}
+
+interface Props {
+  restaurants: Restaurant[];
+}
+
+export default function SearchPageClient({ restaurants }: Props) {
+  return (
+    <div className="container mx-auto p-4">
+      <h1 className="text-3xl font-bold mb-6">Restaurant Search — Client Components</h1>
+      <p className="text-gray-500 mb-4">Basic info SSRed, async widgets fetched client-side.</p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {restaurants.map((restaurant) => (
+          <div key={restaurant.id} className="bg-white rounded-lg shadow-md p-4">
+            {/* Static content — SSRed on server */}
+            <RestaurantCardHeader restaurant={restaurant} />
+
+            {/* Lazy-loaded widgets — NOT SSRed, only skeleton renders on server */}
+            <Suspense fallback={<CardWidgetsSkeleton />}>
+              <AsyncRestaurantWidgets restaurantId={restaurant.id} />
+            </Suspense>
+
+            <RestaurantCardFooter restaurant={restaurant} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+#### Async Widgets Component (Client-Side Fetching)
+
+Create `app/javascript/components/restaurant/AsyncRestaurantWidgets.tsx`:
 
 ```typescript
 import React, { useState, useEffect } from 'react';
-import StatusBadge from '../../restaurant/StatusBadge';
-
-interface StatusData {
-  status: 'open' | 'closed' | 'custom_hours';
-  timestamp: number;
-}
+import { StatusBadge } from './StatusBadge';
+import { WaitTimeBadge } from './WaitTimeBadge';
+import { RatingBadge } from './RatingBadge';
+import { SpecialsList } from './SpecialsList';
+import { TrendingItems } from './TrendingItems';
 
 interface Props {
   restaurantId: number;
 }
 
-export default function AsyncStatus({ restaurantId }: Props) {
-  const [status, setStatus] = useState<StatusData | null>(null);
-  const [error, setError] = useState<string | null>(null);
+export default function AsyncRestaurantWidgets({ restaurantId }: Props) {
+  const [status, setStatus] = useState<string | null>(null);
+  const [waitTime, setWaitTime] = useState<number | null>(null);
+  const [rating, setRating] = useState<{ average_rating: number; review_count: number } | null>(null);
+  const [specials, setSpecials] = useState<any[] | null>(null);
+  const [trending, setTrending] = useState<any[] | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
+    const opts = { signal: controller.signal };
 
-    // Data fetches on CLIENT-SIDE
-    fetch(`/api/restaurants/${restaurantId}/status`, {
-      signal: controller.signal,
-    })
-      .then((res) => res.json())
-      .then((data: StatusData) => {
-        setStatus(data);
-      })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          setError('Failed to load status');
-        }
-      });
+    // Fire all 5 fetches in parallel (limited by browser's 6-connection limit)
+    fetch(`/api/restaurants/${restaurantId}/status`, opts).then(r => r.json()).then(setStatus).catch(() => {});
+    fetch(`/api/restaurants/${restaurantId}/wait_time`, opts).then(r => r.json()).then(setWaitTime).catch(() => {});
+    fetch(`/api/restaurants/${restaurantId}/rating`, opts).then(r => r.json()).then(setRating).catch(() => {});
+    fetch(`/api/restaurants/${restaurantId}/specials`, opts).then(r => r.json()).then(setSpecials).catch(() => {});
+    fetch(`/api/restaurants/${restaurantId}/trending`, opts).then(r => r.json()).then(setTrending).catch(() => {});
 
     return () => controller.abort();
   }, [restaurantId]);
 
-  if (error) return <div className="text-red-600">{error}</div>;
-  if (!status) return null;
-
-  return <StatusBadge status={status.status} />;
+  return (
+    <div className="space-y-3 mt-4">
+      <div className="flex items-center gap-3">
+        {status && <StatusBadge status={status.status} />}
+        {waitTime && <WaitTimeBadge minutes={waitTime.wait_time} />}
+      </div>
+      {rating && <RatingBadge rating={rating.average_rating} count={rating.review_count} />}
+      {specials && <SpecialsList promotions={specials.promotions} />}
+      {trending && <TrendingItems items={trending.items} />}
+    </div>
+  );
 }
 ```
 
-Create similar async components:
-- `AsyncWaitTime.tsx` - Fetches `/api/restaurants/:id/wait_time` (100-150ms)
-- `AsyncSpecials.tsx` - Fetches `/api/restaurants/:id/specials`
-- `AsyncTrending.tsx` - Fetches `/api/restaurants/:id/trending`
-- `AsyncRating.tsx` - Fetches `/api/restaurants/:id/rating`
-
-**Key**: Each async component is in its own file and imported via `lazy()` → separate chunk in webpack bundle.
-**Important**: Lazy-loaded components are NOT SSRed - only their Suspense fallbacks (spinners) render on server. After hydration, the lazy chunks load and fetch data client-side.
+**Key**: Each card fires 5 parallel API fetches. With 4 cards = 20 fetches, but the browser limits to 6 concurrent connections per domain, creating a waterfall effect.
 
 ---
 
-### 4. Rails View
+### 3. Routes Configuration
 
-Create `app/views/restaurants/search.html.erb`:
-
-```erb
-<div id="search-page-app">
-  <%= react_component(
-    "SearchPage",
-    { restaurant_id: @restaurant.id },
-    { prerender: true }
-  ) %>
-</div>
-
-<script>
-  // Collect Web Vitals
-  import { getCLS, getFID, getFCP, getLCP, getTTFB } from 'web-vitals';
-
-  getCLS(metric => sendMetric(metric));
-  getFID(metric => sendMetric(metric));
-  getFCP(metric => sendMetric(metric));
-  getLCP(metric => sendMetric(metric));
-  getTTFB(metric => sendMetric(metric));
-
-  function sendMetric(metric) {
-    fetch('/api/performance_metrics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: metric.name,
-        value: metric.value,
-        page_type: 'traditional',
-        timestamp: new Date().toISOString(),
-      }),
-    });
-  }
-</script>
-```
-
----
-
-### 5. Routes Configuration
-
-Add to `config/routes.rb`:
+Already configured in `config/routes.rb`:
 
 ```ruby
-get '/search', to: 'restaurants#search'
-get '/api/restaurants/:id/status', to: 'api/restaurants#status'
-get '/api/restaurants/:id/wait_time', to: 'api/restaurants#wait_time'
-get '/api/restaurants/:id/specials', to: 'api/restaurants#specials'
-get '/api/restaurants/:id/trending', to: 'api/restaurants#trending'
-get '/api/restaurants/:id/rating', to: 'api/restaurants#rating'
+get '/search/ssr', to: 'restaurants#search_ssr'       # V1: All data fetched on server
+get '/search/client', to: 'restaurants#search_client'  # V2: Client-side fetch
 ```
 
 ---
 
-### 6. Rails Controller
+### 4. Rails Controller
 
-Create `app/controllers/restaurants_controller.rb`:
+Already implemented in `app/controllers/restaurants_controller.rb`:
 
 ```ruby
 class RestaurantsController < ApplicationController
-  def search
-    @restaurant = Restaurant.find(params[:id] || 1)
+  # V1: Full Server SSR — fetch ALL data, return complete page
+  def search_ssr
+    restaurants = fetch_restaurants
+    @restaurant_data = restaurants.map do |r|
+      {
+        id: r.id, name: r.name, cuisine_type: r.cuisine_type,
+        city: r.city, state: r.state, image_url: r.image_url,
+        latitude: r.latitude, longitude: r.longitude,
+        average_rating: r.average_rating, review_count: r.review_count,
+        status: r.current_status,
+        wait_time: r.current_wait_time,
+        specials: r.active_promotions.map { |p| serialize_promotion(p) },
+        trending: r.trending_items.map { |item| serialize_menu_item(item) },
+      }
+    end
+  end
+
+  # V2: Client Components — send basic info only, client fetches the rest
+  def search_client
+    @restaurants = fetch_restaurants_basic
+  end
+
+  private
+
+  def fetch_restaurants
+    Restaurant.by_cuisine(params[:cuisine] || 'Italian').in_city(params[:city] || 'New York').limit(4)
+  end
+
+  def fetch_restaurants_basic
+    fetch_restaurants.select(:id, :name, :cuisine_type, :city, :state, :image_url,
+                             :latitude, :longitude, :average_rating, :review_count)
   end
 end
 ```
@@ -242,18 +310,53 @@ end
 
 ## Success Criteria
 
-- [ ] `/search` page loads and renders
-- [ ] Static content visible immediately (SSRed)
-- [ ] Spinners visible initially (placeholders)
-- [ ] All 5 async components load (separate API calls)
-- [ ] Spinners replaced with content when data arrives
-- [ ] Web Vitals collected: LCP ~500-600ms, CLS ~0.10-0.15
-- [ ] Network waterfall shows sequential API calls (fetch waterfall)
+### V1: Full Server SSR (`/search/ssr`)
+- [ ] Page loads with ALL data visible immediately (no spinners)
+- [ ] TTFB is slow (~1200-1500ms) because of sequential server queries
+- [ ] No CLS (all content arrives at once)
+- [ ] No client-side API calls visible in DevTools Network tab
+
+### V2: Client Components (`/search/client`)
+- [ ] Static card headers visible immediately (SSRed)
+- [ ] Skeleton placeholders visible initially
+- [ ] All 20 API calls visible in DevTools Network tab (4 restaurants × 5 endpoints)
+- [ ] Skeletons replaced with content when data arrives
+- [ ] CLS ~0.10-0.15 (layout shifts when skeletons replaced)
 - [ ] Console shows no errors
 
 ---
 
 ## Key Technical Details
+
+### V1: Why Full Server SSR Is Slow
+
+```
+Timeline:
+0ms:        Request arrives at Rails
+0-1200ms:   Sequential queries: 4 restaurants × 5 queries each
+            (Ruby map block = sequential, no parallelism)
+1200ms:     react_component renders full page with all data
+1200-1300ms: HTML sent to browser
+1300-1400ms: JS bundles download, React hydrates
+1400-1500ms: Page interactive (LCP)
+```
+
+The bottleneck is Ruby's sequential execution. Each restaurant's `current_status`, `current_wait_time`, `active_promotions`, `trending_items` run one after another.
+
+### V2: Why Client Components Feel Slow
+
+```
+Timeline:
+0-100ms:    SSRed HTML received (card headers + skeleton placeholders)
+100-150ms:  JS bundles download (main bundle + lazy chunk)
+150-200ms:  React hydrates
+200-250ms:  Lazy AsyncRestaurantWidgets loads, useEffect fires 20 fetch()s
+250-500ms:  First batch of responses (6 concurrent, browser limit)
+500-650ms:  Second batch of responses
+650-800ms:  All content visible (LCP)
+```
+
+The waterfall: lazy component must load → mount → useEffect fires → 20 API calls limited to 6 concurrent → multiple round trips.
 
 ### What "use client" Does
 
@@ -261,79 +364,29 @@ end
 - ✅ The component AND all components it imports become client components
 - ✅ Client components go into the **client bundle** (NOT the RSC bundle)
 - ✅ Static parts of client components CAN be SSRed
-- ❌ Lazy-loaded components (via `lazy()`) are NOT SSRed - only their fallbacks render
+- ❌ Lazy-loaded components (via `lazy()`) are NOT SSRed — only their fallbacks render
 - ✅ Client components can use hooks (useState, useEffect, etc.), state, and context
 - ❌ Component is NOT in RSC bundle (excluded from server components)
-
-**Result**: Traditional React pattern with client-side interactivity.
-
-### Why This Feels Slow
-
-```
-Timeline:
-0-50ms:   SSRed HTML received (spinners visible because lazy components NOT SSRed)
-50-100ms: JS bundles download (main bundle + lazy chunks)
-100-150ms: React hydrates
-150-200ms: Lazy components load and mount, useEffect fires
-200-350ms: API requests in flight (~100-150ms wait_time query)
-350-500ms: Responses received, spinners replaced with content
-500-600ms: All content visible (LCP)
-```
-
-Lazy-loaded components fetch data client-side → waterfall effect.
-
-### Suspense + fallback Pattern
-
-```typescript
-<Suspense fallback={<Spinner />}>
-  <AsyncStatus restaurantId={restaurantId} />
-</Suspense>
-```
-
-- **On server**: Only the Spinner fallback is rendered (lazy component NOT SSRed)
-- **After hydration**: Lazy chunk loads, component mounts, useEffect fetches data
-- **When data arrives**: Spinner replaced with actual content (causes CLS)
-
----
-
-## Troubleshooting
-
-**Problem**: Content doesn't load (infinite spinner)
-- **Solution**: Check `/api/restaurants/:id/*` endpoints return valid JSON
-
-**Problem**: Content flashes then disappears
-- **Solution**: Ensure API response includes correct data structure
-
-**Problem**: "use client" not working as expected
-- **Solution**: Verify it's at the very top of the file (before imports)
 
 ---
 
 ## Files Created/Modified
 
-- ✅ `app/javascript/entries/search.tsx` (webpack entry point)
-- ✅ `app/javascript/components/search/SearchPage.tsx` (WITH "use client" at root)
-- ✅ `app/javascript/components/async/traditional/AsyncStatus.tsx` (lazy-loaded, separate chunk)
-- ✅ `app/javascript/components/async/traditional/AsyncWaitTime.tsx` (lazy-loaded, separate chunk)
-- ✅ `app/javascript/components/async/traditional/AsyncSpecials.tsx` (lazy-loaded, separate chunk)
-- ✅ `app/javascript/components/async/traditional/AsyncTrending.tsx` (lazy-loaded, separate chunk)
-- ✅ `app/javascript/components/async/traditional/AsyncRating.tsx` (lazy-loaded, separate chunk)
-- ✅ `app/views/restaurants/search.html.erb` (Rails view)
-- ✅ `app/controllers/restaurants_controller.rb` (Rails controller, `search` action)
+- ✅ `app/javascript/components/search/SearchPageSSR.tsx` (V1 page component)
+- ✅ `app/javascript/components/search/SearchPageClient.tsx` (V2 page component)
+- ✅ `app/javascript/components/restaurant/AsyncRestaurantWidgets.tsx` (V2 client-side fetching)
+- ✅ `app/views/restaurants/search_ssr.html.erb` (V1 Rails view)
+- ✅ `app/views/restaurants/search_client.html.erb` (V2 Rails view)
+- ✅ `app/controllers/restaurants_controller.rb` (already implemented)
+- ✅ `config/routes.rb` (already configured)
 
 ---
 
 ## Notes
 
-- Both Task 3 & 4 use the SAME webpack config created in Task 1
-- **Pattern**: Put `"use client"` at root level → all components become client components
-  - Components go into the **client bundle** (NOT RSC bundle)
-  - Static parts SSRed, but lazy-loaded components are **NOT SSRed**
-  - Only Suspense fallbacks (spinners) render on server for lazy components
-  - Client-side fetch waterfall causes ~500-600ms LCP
-- Async components are imported via `lazy()` for code-splitting
-- Each async component has `useState` + `useEffect` for client-side data fetching
-- Performance difference (vs RSC) comes from:
-  1. Lazy components NOT SSRed (spinners shown initially)
-  2. Client-side fetch waterfall (sequential API requests after hydration)
-- This task demonstrates traditional React SSR with lazy-loading (current standard)
+- Both V1 and V2 use the same webpack config created in Task 1
+- V1 demonstrates the cost of sequential server-side data fetching (slow TTFB)
+- V2 demonstrates the cost of client-side fetch waterfall (fast TTFB, slow LCP)
+- V3 (RSC, Task 4) solves both problems with server-side streaming
+- The three versions share the same display components, API endpoints, and database
+- Performance differences are best demonstrated with Chrome DevTools network throttling

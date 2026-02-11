@@ -19,4 +19,9 @@ ReactOnRailsPro.configure do |config|
 
   # RSC payload generation URL path
   config.rsc_payload_generation_url_path = 'rsc_payload/'
+
+  # Copy loadable-stats.json to the node renderer for @loadable/server ChunkExtractor
+  config.assets_to_copy = (if ENV["HMR"] != "true"
+                             Rails.root.join("public", "packs", "loadable-stats.json")
+                           end)
 end

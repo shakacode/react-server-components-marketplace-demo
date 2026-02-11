@@ -16,6 +16,11 @@ module.exports = {
           refresh: env.isDevelopment && env.runningWebpackDevServer,
         },
       },
+      experimental: {
+        plugins: [
+          ['@swc/plugin-loadable-components', {}]
+        ]
+      }
     },
   },
 };

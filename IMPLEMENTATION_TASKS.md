@@ -61,21 +61,23 @@ restaurants (50K)
 
 ## Task 2: Shared Components & API (12-16 hours)
 
-**Goal**: Display components and API endpoints used by both versions
+**Goal**: Display components and API endpoints used by all three versions
 
 ### Deliverables
 
-**Display Components** (100% shared):
+**Display Components** (100% shared across V1, V2, V3):
 - `StatusBadge` - "Open", "Closed", "Custom Hours"
 - `WaitTimeBadge` - "25 min wait"
 - `SpecialsList` - Active promotions
-- `RatingBadge` - "4.5 ⭐ (1,234 reviews)"
+- `RatingBadge` - "4.5 (1,234 reviews)"
 - `TrendingItems` - Top 3 popular items
 - `RestaurantCardHeader` - Name, image, cuisine
-- `RestaurantCardFooter` - Rating, distance
+- `RestaurantCardFooter` - Rating, distance (uses Haversine formula)
+- `CardWidgetsSkeleton` - Skeleton placeholder for async widgets
+- `Spinner` - Loading spinner with optional label
 - Design system with Tailwind tokens
 
-**API Endpoints** (100% shared):
+**API Endpoints** (used by V2 client-side fetching):
 - `GET /api/restaurants/:id/status` → "open" | "closed" | "custom_hours"
 - `GET /api/restaurants/:id/wait_time` → wait time in minutes
 - `GET /api/restaurants/:id/specials` → active promotions
@@ -83,8 +85,9 @@ restaurants (50K)
 - `GET /api/restaurants/:id/rating` → average rating + count
 
 **Routes**:
-- `GET /search` → traditional version
-- `GET /search/rsc` → RSC version
+- `GET /search/ssr` → V1: Full Server SSR
+- `GET /search/client` → V2: Client Components + Loadable
+- `GET /search/rsc` → V3: RSC Streaming
 - All API endpoints under `/api/`
 
 ### Success Criteria
@@ -98,7 +101,8 @@ restaurants (50K)
 ### Key Files
 
 - `app/javascript/components/restaurant/` (display components)
-- `app/javascript/components/search/` (static content)
+- `app/javascript/components/shared/` (Spinner, CardWidgetsSkeleton)
+- `app/javascript/utils/distance.ts` (Haversine distance calculation)
 - `app/controllers/api/restaurants_controller.rb`
 - `config/routes.rb`
 - `app/javascript/types/index.ts`
@@ -111,204 +115,191 @@ restaurants (50K)
 
 ---
 
-## Task 3: Traditional Version (10-14 hours)
+## Task 3: Traditional Versions — V1 + V2 (10-14 hours)
 
-**Goal**: Traditional React SSR with client-side data fetching, using server bundle
+**Goal**: Two traditional (non-RSC) versions of the restaurant search results page
 
-**Important**: Task 3 & 4 share the same webpack config created in Task 1. The difference:
-- Task 3: "use client" at root → all components in client bundle → SSR renders static parts, lazy-loaded components NOT SSRed (only their fallbacks) → client-side data fetch
-- Task 4: No "use client" (async server components) → components in RSC bundle → entire page SSRed including client components → server-side data fetch
+**Important**: Tasks 3 & 4 share the same webpack config from Task 1. The difference is how data is fetched:
+- **V1 (Full SSR)**: All data fetched sequentially on Rails server → slow TTFB, complete page
+- **V2 (Client)**: `"use client"` at root → lazy components NOT SSRed → client-side fetch waterfall
+- **V3 (RSC, Task 4)**: No `"use client"` → RSC bundle → async props with emit block → server-side streaming
 
-**Key Pattern**: Put `"use client"` at root level. Everything underneath becomes a client component and goes into the client bundle (not the RSC bundle).
+### V1: Full Server SSR (`/search/ssr`)
 
-### Deliverables
+All data fetched on the Rails server **sequentially** in the controller. Browser receives a complete page.
 
-**Rails View** (`search.html.erb`):
-```erb
-<div class="search-page">
-  <%= react_component("SearchPage", { restaurant_id: @restaurant.id }) %>
-</div>
+```ruby
+# Controller fetches ALL data sequentially
+def search_ssr
+  restaurants = fetch_restaurants
+  @restaurant_data = restaurants.map do |r|
+    { id: r.id, name: r.name, status: r.current_status,
+      wait_time: r.current_wait_time, specials: ..., trending: ... }
+  end
+end
 ```
 
-**Page Component** (`SearchPage.tsx`):
-- Parent component (no "use client")
-- SSRed by `react_component` helper
-- Returns SearchPageContent as child
+```erb
+<!-- View passes all data as props -->
+<%= react_component("SearchPageSSR", props: { restaurant_data: @restaurant_data }, prerender: true) %>
+```
 
-**Client Components** (all components under the "use client" root):
-- `SearchPageContent` - main content component
-- `AsyncStatus` component with useState + useEffect
-- `AsyncWaitTime` component with useState + useEffect
-- `AsyncSpecials` component with useState + useEffect
-- `AsyncTrending` component with useState + useEffect
-- `AsyncRating` component with useState + useEffect
+**Expected Performance**: TTFB ~1200-1500ms (sequential queries), LCP ~1400-1600ms, CLS ~0.00
 
-**Pattern**:
+### V2: Client Components + Loadable (`/search/client`)
+
+Only basic info fetched on server. Async widgets lazy-loaded and fetch data client-side.
+
 ```typescript
-// SearchPage.tsx - SSRed by react_component
-export default function SearchPage({ restaurant_id }: Props) {
-  return <SearchPageContent restaurantId={restaurant_id} />;
-}
+'use client';  // Makes ALL components into client components
 
-// SearchPageContent.tsx - Forces client-side via "use client"
-"use client";
-export function SearchPageContent({ restaurantId }: Props) {
-  const [status, setStatus] = useState(null);
-  useEffect(() => {
-    fetch(`/api/restaurants/${restaurantId}/status`)
-      .then(r => r.json())
-      .then(setStatus);
-  }, [restaurantId]);
-  return status ? <StatusBadge status={status} /> : null;
+const AsyncRestaurantWidgets = lazy(() => import('../restaurant/AsyncRestaurantWidgets'));
+
+export default function SearchPageClient({ restaurants }: Props) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {restaurants.map((restaurant) => (
+        <div key={restaurant.id}>
+          <RestaurantCardHeader restaurant={restaurant} />
+          <Suspense fallback={<CardWidgetsSkeleton />}>
+            <AsyncRestaurantWidgets restaurantId={restaurant.id} />
+          </Suspense>
+          <RestaurantCardFooter restaurant={restaurant} />
+        </div>
+      ))}
+    </div>
+  );
 }
 ```
 
-**View Template**:
-```erb
-<!-- app/views/restaurants/search.html.erb -->
-<RestaurantCardHeader restaurant={<%= restaurant.to_json %>} />
-<Suspense fallback={<Spinner />}>
-  <AsyncStatus restaurantId={<%= restaurant.id %>} />
-</Suspense>
-<!-- etc -->
-```
-
-**Performance Monitoring**:
-- Collect Web Vitals (LCP, CLS, INP)
-- Measure: "Lazy Load Time" (mount to display)
+**Expected Performance**: TTFB ~100-200ms, LCP ~600-800ms (fetch waterfall), CLS ~0.10-0.15
 
 ### Success Criteria
 
-- [ ] Static parts SSR completely
-- [ ] Spinners show while loading
-- [ ] Lazy components load in separate chunks
-- [ ] API calls visible in DevTools Network
-- [ ] Page fully loaded: ~500-600ms
-- [ ] LCP: ~500-600ms
-- [ ] CLS: ~0.10-0.15
+- [ ] V1: All data visible immediately, slow TTFB
+- [ ] V2: Skeletons visible, then replaced with content
+- [ ] V2: 20 API calls visible in DevTools Network (4 restaurants × 5 endpoints)
+- [ ] Both pages render identical restaurant grid layout
+- [ ] Console shows no errors
 
 ### Key Files
 
-- `app/javascript/entries/search.tsx`
-- `app/javascript/components/async/traditional/` (6 files: SearchPage + 5 async components)
-- `app/views/restaurants/search.html.erb`
-- `app/javascript/utils/performance/vitals.ts`
+- `app/javascript/components/search/SearchPageSSR.tsx` (V1)
+- `app/javascript/components/search/SearchPageClient.tsx` (V2)
+- `app/javascript/components/restaurant/AsyncRestaurantWidgets.tsx` (V2 client fetching)
+- `app/views/restaurants/search_ssr.html.erb`
+- `app/views/restaurants/search_client.html.erb`
+- `app/controllers/restaurants_controller.rb`
 
 ### Notes
 
 - Both versions exist in same app, different routes/templates
 - Same database, same API, same display components
-- Only difference: data fetching approach (client vs server)
+- V1 shows the cost of sequential server queries (slow TTFB)
+- V2 shows the cost of client-side fetch waterfall (fast TTFB, slow LCP)
+- Performance differences best demonstrated with Chrome DevTools network throttling
 
 ---
 
-## Task 4: RSC Version (10-14 hours)
+## Task 4: RSC Version — V3 (10-14 hours)
 
-**Goal**: Server Components + streaming implementation
+**Goal**: Server Components + streaming with async props (react_on_rails v16.3+)
 
-**Important**: Task 3 & 4 share the same webpack config created in Task 1. This task focuses on component patterns only.
+### How Async Props Work
 
-### Deliverables
+The RSC version uses `stream_react_component_with_async_props` with an emit block:
 
-**Rails View** (`search_rsc.html.erb`):
+1. **Rails view** uses `stream_react_component_with_async_props` with initial props + emit block
+2. **Emit block** calls `emit.call("prop_name", value)` to send data to Node renderer
+3. **React component** receives `getReactOnRailsAsyncProp` as a **PROP** (NOT an import)
+4. **Async server components** call `await getReactOnRailsAsyncProp("prop_name")` to get data
+5. Each emit resolves the corresponding promise → Suspense boundary resolves → HTML streamed
+
 ```erb
-<div class="search-page">
-  <%= stream_react_component("SearchPageRSC", { restaurant_id: @restaurant.id }) %>
-</div>
+<!-- Rails view with emit block — NO separate AsyncProps module needed -->
+<%= stream_react_component_with_async_props("SearchPageRSC",
+      props: { restaurants: @restaurants }) do |emit|
+
+  @restaurants.each do |restaurant|
+    emit.call("restaurant_#{restaurant.id}_widgets", {
+      status: restaurant.current_status,
+      wait_time: restaurant.current_wait_time,
+      # ... more data
+    })
+  end
+%>
 ```
 
-**Async Server Components**:
-- `SearchPageRSC.tsx` (async function, server component)
-- `AsyncStatus.tsx` (async function, server component)
-- `AsyncWaitTime.tsx` (async function, server component)
-- `AsyncSpecials.tsx` (async function, server component)
-- `AsyncTrending.tsx` (async function, server component)
-- `AsyncRating.tsx` (async function, server component)
-
-**Pattern**:
 ```typescript
-// SearchPageRSC.tsx - Async server component
-async function SearchPageRSC({ restaurant_id }: Props) {
+// Server component — getReactOnRailsAsyncProp is a PROP, not an import
+async function AsyncRestaurantWidgetsRSC({ restaurantId, getReactOnRailsAsyncProp }: Props) {
+  const data = await getReactOnRailsAsyncProp(`restaurant_${restaurantId}_widgets`);
   return (
-    <div>
-      <RestaurantCardHeader restaurantId={restaurant_id} />
-      <Suspense fallback={<Spinner />}>
-        <AsyncStatus restaurantId={restaurant_id} />
-      </Suspense>
-      {/* etc */}
-    </div>
+    <>
+      <StatusBadge status={data.status} />
+      <WaitTimeBadge minutes={data.wait_time} />
+    </>
   );
 }
-export default SearchPageRSC;
-
-// AsyncStatus.tsx - Server component (async, no hooks)
-async function AsyncStatus({ restaurantId }: Props) {
-  const status = await getReactOnRailsAsyncProp('status', { restaurantId });
-  return <StatusBadge status={status} />;
-}
-export default AsyncStatus;
 ```
-
-**Performance Monitoring**:
-- Collect Web Vitals (same as Traditional)
-- Measure: "Stream Complete Time", "Server Fetch Time"
 
 ### Success Criteria
 
-- [ ] All data fetched server-side (before rendering)
+- [ ] All data fetched server-side (no client-side API calls in DevTools)
 - [ ] HTML streamed to browser with Suspense boundaries
-- [ ] Spinners resolved on server (no client-side spinners)
-- [ ] API calls ONLY on server (no fetch() in components)
-- [ ] Page fully loaded: ~200-250ms
-- [ ] LCP: ~200-250ms
-- [ ] CLS: ~0.02 (no layout shifts)
-- [ ] 59% faster than Traditional (550ms → 225ms)
+- [ ] Brief skeleton fallbacks during streaming (~100-200ms)
+- [ ] LCP: ~200-350ms (dramatically faster than V1 and V2)
+- [ ] CLS: ~0.02-0.08 (minimal shifts from skeleton replacement)
+- [ ] No hydration errors
 
 ### Key Files
 
-- `app/javascript/entries/search_rsc.tsx`
-- `app/javascript/components/async/rsc/` (6 files: SearchPageRSC + 5 async components)
-- `app/views/restaurants/search_rsc.html.erb`
-- `config/initializers/react_on_rails.rb` (RSC already enabled in Task 1)
+- `app/javascript/components/search/SearchPageRSC.tsx` (root server component)
+- `app/javascript/components/restaurant/AsyncRestaurantWidgetsRSC.tsx` (async server component)
+- `app/views/restaurants/search_rsc.html.erb` (Rails view with emit block)
+- `app/controllers/restaurants_controller.rb` (already implemented)
 
 ### Notes
 
-- Server components can't use hooks, state, or context (RSC constraint)
-- All data fetched via `getReactOnRailsAsyncProp` (provided by react-on-rails)
-- Same display components as Traditional version
-- Only difference from Traditional: where data is fetched
+- `getReactOnRailsAsyncProp` is a **PROP** (injected by framework), NOT an import
+- Use `stream_react_component_with_async_props` (NOT `stream_react_component`)
+- No separate AsyncProps Ruby module — the emit block in the view IS the data fetching layer
+- Requires react_on_rails v16.3+ for async props support
+- Server components cannot use hooks, state, or context (RSC constraint)
+- Same display components as V1 and V2
+- CLS is NOT zero — Suspense fallbacks cause brief layout shifts (~0.02-0.08)
 
 ---
 
 ## Task 5: Comparison Dashboard & Documentation (6-10 hours)
 
-**Goal**: Compare both versions and document the project
+**Goal**: Compare all three versions and document the project
 
 ### Deliverables
 
 **Comparison Dashboard**:
 - Route: `/dashboard`
-- Side-by-side metrics: Traditional vs RSC
+- Side-by-side metrics: V1 (Full SSR) vs V2 (Client) vs V3 (RSC)
 - Charts: LCP over time, CLS distribution
 - Network waterfall visualization
-- Key stats: 59% LCP improvement, 83% CLS improvement
+- Key stats showing RSC advantages
 
 **Comparison View**:
 - Route: `/comparison`
-- Two iframes: Traditional + RSC
+- Three iframes: V1 + V2 + V3
 - Synchronized scrolling
 - Real-time metrics overlay
 
 **Documentation**:
 - `README.md` - What is LocalHub, how to run it
 - `DEPLOYMENT.md` - How to deploy
-- `DEMO_WALKTHROUGH.md` - How to present it
+- `DEMO_WALKTHROUGH.md` - How to present it (including Chrome DevTools throttling instructions)
 - Inline code comments
 
 ### Success Criteria
 
 - [ ] Dashboard accessible and metrics accurate
-- [ ] Comparison view works smoothly
+- [ ] Comparison view works smoothly with all three versions
 - [ ] Documentation is clear and complete
 - [ ] Demo is ready to show to customers
 
@@ -322,9 +313,10 @@ export default AsyncStatus;
 
 ### Notes
 
-- Dashboard pulls metrics from both versions (collected during Tasks 3 & 4)
-- Should highlight the 59% LCP improvement dramatically
+- Dashboard pulls metrics from all three versions
+- Should highlight V3's dramatic improvement over V1 and V2
 - Comparison view is the "wow" moment for customers
+- Include instructions for Chrome DevTools network/CPU throttling to make differences visible
 
 ---
 
@@ -333,9 +325,9 @@ export default AsyncStatus;
 | Task | Time | Notes |
 |------|------|-------|
 | 1. Setup & Database | 8-12h | **CRITICAL**: Data seeding determines demo credibility |
-| 2. Shared Components & API | 12-16h | Used by both versions, done once |
-| 3. Traditional Version | 10-14h | Can run parallel with Task 4 |
-| 4. RSC Version | 10-14h | Can run parallel with Task 3 |
+| 2. Shared Components & API | 12-16h | Used by all three versions, done once |
+| 3. Traditional Versions (V1 + V2) | 10-14h | Can run parallel with Task 4 |
+| 4. RSC Version (V3) | 10-14h | Can run parallel with Task 3 |
 | 5. Dashboard & Docs | 6-10h | After 3 & 4 complete |
 | **Total** | **46-66h** | **5-8 weeks with 1 developer** |
 
@@ -351,11 +343,45 @@ Task 1 (Setup & Database) [BLOCKING]
 Task 2 (Shared Components & API)
   ↓
 [PARALLELIZATION POINT]
-  ├─ Task 3 (Traditional)  [Can run in parallel]
-  ├─ Task 4 (RSC)          [Can run in parallel]
+  ├─ Task 3 (V1: Full SSR + V2: Client)  [Can run in parallel]
+  ├─ Task 4 (V3: RSC Streaming)          [Can run in parallel]
   ↓
 Task 5 (Dashboard & Docs)
 ```
+
+---
+
+## Three-Version Architecture
+
+### Why Three Versions?
+
+Each version isolates a different performance bottleneck:
+
+| Version | Route | Data Fetching | Bottleneck |
+|---------|-------|---------------|------------|
+| V1: Full Server SSR | `/search/ssr` | All data on server, sequential | Slow TTFB (~1200ms) — Ruby sequential queries |
+| V2: Client Components | `/search/client` | Basic info SSR, widgets fetch client-side | Slow LCP (~700ms) — client fetch waterfall, 6-connection limit |
+| V3: RSC Streaming | `/search/rsc` | All data on server, streamed | Fast everything (~300ms) — server streaming, no waterfall |
+
+### Performance Comparison (with network throttling)
+
+```
+Metric          V1 (Full SSR)    V2 (Client)    V3 (RSC)
+──────          ─────────────    ───────────    ────────
+TTFB            ~1200-1500ms     ~100-200ms     ~50-100ms
+LCP             ~1400-1600ms     ~600-800ms     ~200-350ms
+CLS             ~0.00            ~0.10-0.15     ~0.02-0.08
+```
+
+### Demo Flow
+
+1. Open all three versions side by side
+2. Enable Chrome DevTools → Network → "Slow 3G" or "Fast 3G" throttling
+3. Refresh all three simultaneously
+4. Observe:
+   - V1: Long white screen, then everything appears at once
+   - V2: Quick first paint with skeletons, then slow fill-in over ~600ms
+   - V3: Quick first paint with skeletons, then fast streaming fill-in over ~200ms
 
 ---
 
@@ -363,8 +389,8 @@ Task 5 (Dashboard & Docs)
 
 **This is make-or-break for the demo.**
 
-- If queries take <50ms: Demo fails (both versions look the same)
-- If queries take 100-150ms: Demo succeeds (RSC advantage is dramatic)
+- If queries take <50ms: Demo fails (all versions look the same)
+- If queries take 100-150ms: Demo succeeds (V3 advantage is dramatic)
 
 **Verification**:
 ```bash
@@ -390,14 +416,14 @@ rake db:seed:verify
 
 | Category | % of Code | Shared? | Notes |
 |----------|-----------|---------|-------|
-| Database, Models, API | 30% | 100% | Both versions use same data |
+| Database, Models, API | 30% | 100% | All versions use same data |
 | Display Components | 20% | 100% | StatusBadge, etc. are pure components |
 | Tailwind Styling | 15% | 100% | Same design system |
-| Routes, Layouts | 10% | 100% | Both have /search and /search/rsc |
-| Async Component Structure | 10% | 95% | Same pattern, different data source |
-| Tests | 5% | 100% | Test both versions |
-| Webpack Config | 5% | 0% | Completely different (trad vs RSC) |
-| Data Fetching Logic | 5% | 0% | fetch() vs getReactOnRailsAsyncProp |
+| Routes, Layouts | 10% | 100% | /search/ssr, /search/client, /search/rsc |
+| Async Component Structure | 10% | 90% | Similar pattern, different data source |
+| Tests | 5% | 100% | Test all versions |
+| Webpack Config | 5% | 0% | Different bundles (client vs RSC) |
+| Data Fetching Logic | 5% | 0% | Inline props vs fetch() vs getReactOnRailsAsyncProp |
 
 **Result**: ~82-85% code reuse
 
@@ -410,14 +436,3 @@ rake db:seed:verify
 3. **Start Task 1** - Database is critical path
 4. **Monitor latency** - Verify Task 1.4 achieves 100-150ms queries
 5. **Execute Tasks 2-5** in order
-
----
-
-## Questions to Clarify
-
-1. **Timeline**: 5-8 weeks acceptable?
-2. **Team**: How many developers?
-3. **Deployment**: Where should it run? (localhost, staging, production?)
-4. **Customization**: Any specific restaurants to use for demo data?
-5. **Metrics**: Any Web Vitals targets beyond 59% LCP improvement?
-

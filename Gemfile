@@ -16,9 +16,9 @@ gem 'importmap-rails'
 gem 'turbo-rails'
 gem 'stimulus-rails'
 
-# React on Rails - SAME VERSION for both gems
-gem 'react_on_rails', '16.2.0.beta.20'
-gem 'react_on_rails_pro', '16.2.0.beta.20'
+# React on Rails - local development from v16.3 branch
+gem 'react_on_rails', path: '/mnt/ssd/react_on_rails_v16.3/react_on_rails'
+gem 'react_on_rails_pro', path: '/mnt/ssd/react_on_rails_v16.3/react_on_rails_pro'
 
 # Shakapacker for webpack integration
 gem 'shakapacker', '~> 9.5'

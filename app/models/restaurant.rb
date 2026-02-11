@@ -10,6 +10,9 @@ class Restaurant < ApplicationRecord
   validates :cuisine_type, presence: true
   validates :timezone, presence: true
 
+  scope :by_cuisine, ->(cuisine) { where(cuisine_type: cuisine) }
+  scope :in_city, ->(city) { where(city: city) }
+
   # Determine current status (open/closed/custom_hours)
   def current_status
     now = Time.current.in_time_zone(timezone)

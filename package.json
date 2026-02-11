@@ -13,17 +13,28 @@
     "renderer": "node node-renderer.js",
     "lint": "eslint app/javascript --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "eslint app/javascript --ext .js,.jsx,.ts,.tsx --fix",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "yalc:publish": "cd /mnt/ssd/react_on_rails_v16.3 && pnpm build && cd packages/react-on-rails && yalc publish --force && cd ../react-on-rails-pro && yalc publish --force && cd ../react-on-rails-pro-node-renderer && yalc publish --force",
+    "yalc:link": "yalc add react-on-rails-pro react-on-rails-pro-node-renderer",
+    "yalc:setup": "pnpm yalc:publish && pnpm yalc:link && pnpm install"
   },
   "dependencies": {
     "@hotwired/stimulus": "^3.2.2",
     "@hotwired/turbo-rails": "^8.0.0",
+    "@loadable/component": "^5.16.7",
+    "@loadable/server": "^5.16.7",
+    "@loadable/webpack-plugin": "^5.15.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-on-rails-pro": "16.2.0-beta.20",
-    "react-on-rails-pro-node-renderer": "16.2.0-beta.20",
+    "react-on-rails-pro": "file:.yalc/react-on-rails-pro",
+    "react-on-rails-pro-node-renderer": "file:.yalc/react-on-rails-pro-node-renderer",
     "react-on-rails-rsc": "19.0.3",
     "web-vitals": "^4.2.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "react-on-rails": "file:.yalc/react-on-rails"
+    }
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
@@ -32,6 +43,7 @@
     "@babel/preset-typescript": "^7.28.5",
     "@pmmmwh/react-refresh-webpack-plugin": "^0.5.15",
     "@swc/core": "^1.7.39",
+    "@swc/plugin-loadable-components": "^11.5.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
@@ -45,7 +57,7 @@
     "mini-css-extract-plugin": "^2.8.0",
     "postcss": "^8.5.6",
     "postcss-loader": "^8.1.0",
-    "postcss-preset-env": "^11.1.1",
+    "postcss-preset-env": "^10.6.1",
     "react-refresh": "^0.14.0",
     "sass": "^1.71.0",
     "sass-loader": "^14.1.0",

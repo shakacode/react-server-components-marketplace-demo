@@ -1,3 +1,5 @@
+import { MenuItem } from '../../types';
+
 interface Props {
   items: MenuItem[];
 }
