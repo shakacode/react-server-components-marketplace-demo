@@ -47,6 +47,19 @@ const HelloWorld: React.FC<HelloWorldProps> = ({ name }) => {
         <CardWidgetsSkeleton />
       </div>
       <hr style={{ margin: '20px 0' }} />
+      <h2>Search Page Versions</h2>
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+        <a href="/search/ssr" style={{ padding: '8px 16px', background: '#3b82f6', color: 'white', borderRadius: '6px', textDecoration: 'none' }}>
+          V1: Full Server SSR
+        </a>
+        <a href="/search/client" style={{ padding: '8px 16px', background: '#8b5cf6', color: 'white', borderRadius: '6px', textDecoration: 'none' }}>
+          V2: Client Components
+        </a>
+        <a href="/search/rsc" style={{ padding: '8px 16px', background: '#059669', color: 'white', borderRadius: '6px', textDecoration: 'none' }}>
+          V3: RSC Streaming
+        </a>
+      </div>
+      <hr style={{ margin: '20px 0' }} />
       <p>React on Rails is working with TypeScript!</p>
       <p>Count: {count}</p>
       <button

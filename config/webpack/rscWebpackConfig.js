@@ -9,19 +9,13 @@ const configureRsc = () => {
   };
   rscConfig.entry = rscEntry;
 
-  // Add the RSC loader before the babel loader
-  const { rules } = rscConfig.module;
-  rules.forEach((rule) => {
-    if (Array.isArray(rule.use)) {
-      // Ensure this loader runs before the JS loader (Babel loader in this case) to properly exclude client components from the RSC bundle.
-      // If your project uses a different JS loader, insert it before that loader instead.
-      const babelLoader = extractLoader(rule, 'babel-loader');
-      if (babelLoader) {
-        rule.use.push({
-          loader: 'react-on-rails-rsc/WebpackLoader',
-        });
-      }
-    }
+  // Add the RSC loader to replace 'use client' modules with client references.
+  // Using enforce: 'post' so it runs AFTER swc-loader compiles TSX→JS,
+  // giving acorn clean JavaScript to parse.
+  rscConfig.module.rules.push({
+    test: /\.(ts|tsx|js|jsx|mjs)$/,
+    enforce: 'post',
+    loader: 'react-on-rails-rsc/WebpackLoader',
   });
 
   // Add the `react-server` condition to the resolve config

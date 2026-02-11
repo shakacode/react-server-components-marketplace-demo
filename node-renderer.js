@@ -32,7 +32,7 @@ const config = {
   supportModules: true,
 
   // Additional NodeJS modules to add to the VM context
-  additionalContext: { URL, AbortController },
+  additionalContext: { URL, AbortController, performance },
 
   // Set to false to use real timers (required for setTimeout, setInterval)
   stubTimers: false,

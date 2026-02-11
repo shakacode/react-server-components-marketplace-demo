@@ -86,6 +86,13 @@ spring/*.pid
 # Bootsnap cache
 tmp/cache/bootsnap*
 
+# SWC compiler cache
+.swc/
+
+# Yalc (local package development)
+.yalc/
+yalc.lock
+
 # Ruby version managers
 .ruby-version
 .ruby-gemset

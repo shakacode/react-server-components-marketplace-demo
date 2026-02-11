@@ -1,3 +1,28 @@
+PATH
+  remote: /mnt/ssd/react_on_rails_v16.3/react_on_rails_pro
+  specs:
+    react_on_rails_pro (16.2.1)
+      addressable
+      async (>= 2.6)
+      connection_pool
+      execjs (~> 2.9)
+      http-2 (>= 1.1.1)
+      httpx (>= 1.7.0)
+      jwt (~> 2.7)
+      rainbow
+      react_on_rails (= 16.2.1)
+
+PATH
+  remote: /mnt/ssd/react_on_rails_v16.3/react_on_rails
+  specs:
+    react_on_rails (16.2.1)
+      addressable
+      connection_pool
+      execjs (~> 2.5)
+      rails (>= 5.2)
+      rainbow (~> 3.0)
+      shakapacker (>= 6.0)
+
 GEM
   remote: https://rubygems.org/
   specs:
@@ -133,7 +158,7 @@ GEM
     globalid (1.3.0)
       activesupport (>= 6.1)
     http-2 (1.1.1)
-    httpx (1.6.3)
+    httpx (1.7.2)
       http-2 (>= 1.0.0)
     i18n (1.14.7)
       concurrent-ruby (~> 1.0)
@@ -276,23 +301,6 @@ GEM
       erb
       psych (>= 4.0.0)
       tsort
-    react_on_rails (16.2.0.beta.20)
-      addressable
-      connection_pool
-      execjs (~> 2.5)
-      rails (>= 5.2)
-      rainbow (~> 3.0)
-      shakapacker (>= 6.0)
-    react_on_rails_pro (16.2.0.beta.20)
-      addressable
-      async (>= 2.6)
-      connection_pool
-      execjs (~> 2.9)
-      http-2 (>= 1.1.1)
-      httpx (~> 1.5)
-      jwt (~> 2.7)
-      rainbow
-      react_on_rails (= 16.2.0.beta.20)
     regexp_parser (2.11.3)
     reline (0.6.3)
       io-console (~> 0.5)
@@ -416,8 +424,8 @@ DEPENDENCIES
   pry-byebug (~> 3.12)
   puma (~> 6.0)
   rails (~> 7.1)
-  react_on_rails (= 16.2.0.beta.20)
-  react_on_rails_pro (= 16.2.0.beta.20)
+  react_on_rails!
+  react_on_rails_pro!
   rspec-rails (~> 6.1)
   rubocop
   rubocop-rails

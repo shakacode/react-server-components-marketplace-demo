@@ -33,12 +33,12 @@ class RestaurantsController < ApplicationController
 
   # V2: Client Components — send basic info only, client fetches the rest
   def search_client
-    @restaurants = fetch_restaurants_basic
+    @restaurants = fetch_restaurants
   end
 
   # V3: RSC Streaming — send basic info, server components fetch async data
   def search_rsc
-    @restaurants = fetch_restaurants_basic
+    @restaurants = fetch_restaurants
     stream_view_containing_react_components(template: "restaurants/search_rsc")
   end
 
@@ -49,12 +49,6 @@ class RestaurantsController < ApplicationController
       .by_cuisine(params[:cuisine] || 'Italian')
       .in_city(params[:city] || 'New York')
       .limit(4)
-  end
-
-  def fetch_restaurants_basic
-    fetch_restaurants
-      .select(:id, :name, :cuisine_type, :city, :state, :image_url, :latitude, :longitude,
-              :average_rating, :review_count)
   end
 
   def serialize_promotion(promo)
