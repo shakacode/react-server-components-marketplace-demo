@@ -3,511 +3,783 @@
 class BlogData
   MAIN_POST = {
     id: 1,
-    title: "Building a Real-Time Analytics Pipeline with Stream Processing",
-    author: "Sarah Chen",
-    date: "2025-01-15",
-    reading_time: "12 min read",
-    tags: %w[architecture streaming rust python],
-    excerpt: "A deep dive into building a production-grade analytics pipeline using Kafka, Flink, and custom Rust workers.",
+    title: "Migrating to React Server Components with React on Rails",
+    author: "ShakaCode Team",
+    date: "2025-06-15",
+    reading_time: "18 min read",
+    tags: %w[react-on-rails rsc streaming migration],
+    excerpt: "A complete guide to migrating your React on Rails application from traditional client-side rendering to React Server Components with streaming.",
     content: <<~MARKDOWN
-## Introduction
+## Why Migrate to RSC?
 
-Building a real-time analytics pipeline is one of the most challenging distributed systems problems. You need to handle **millions of events per second**, ensure exactly-once processing semantics, and deliver results with sub-second latency. In this post, I'll walk through how we built our production pipeline processing 2.5 million events/second.
+React Server Components (RSC) represent a fundamental shift in how React applications render. Instead of shipping all your component code, rendering libraries, and data-fetching logic to the browser, RSC keeps server-only code **entirely on the server**. The client receives only the rendered output and the minimal JavaScript needed for interactivity.
 
-## Architecture Overview
+For React on Rails applications, this means:
 
-Our pipeline consists of four main stages:
+- **Dramatically smaller client bundles** — Libraries like `marked`, `highlight.js`, `date-fns`, or `lodash` that are only needed for rendering stay server-side. This can mean hundreds of kilobytes less JavaScript shipped to users.
+- **Direct access to Rails data** — Server components receive props directly from Rails controllers. No API endpoints needed for initial data.
+- **Streaming with Suspense** — Rails can stream async data chunks as they resolve. Users see content progressively instead of waiting for the slowest query.
+- **Simplified architecture** — No need to duplicate data-fetching logic between Rails controllers and React `useEffect` calls.
 
-1. **Ingestion** — Kafka producers collecting events from edge servers
-2. **Processing** — Apache Flink for stream transformations and windowed aggregations
-3. **Storage** — TimescaleDB for time-series data, Redis for real-time dashboards
-4. **Serving** — GraphQL API with subscription support for live updates
+## Prerequisites
 
-```yaml
-# docker-compose.yml — Local development stack
-version: "3.9"
-services:
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_NUM_PARTITIONS: 12
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    ports:
-      - "9092:9092"
-
-  flink-jobmanager:
-    image: flink:1.18-scala_2.12
-    command: jobmanager
-    environment:
-      FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
-        state.backend: rocksdb
-        state.checkpoints.dir: s3://checkpoints/flink
-    ports:
-      - "8081:8081"
-
-  timescaledb:
-    image: timescale/timescaledb:latest-pg16
-    environment:
-      POSTGRES_PASSWORD: analytics
-    volumes:
-      - timescale_data:/var/lib/postgresql/data
-```
-
-## Event Schema Design
-
-Every event in our system follows a strict schema. We use Avro for serialization with a schema registry to ensure backward compatibility:
-
-```javascript
-// event-schema.js — Base event definition
-const EventSchema = {
-  type: 'record',
-  name: 'AnalyticsEvent',
-  namespace: 'com.pipeline.events',
-  fields: [
-    { name: 'event_id', type: 'string' },
-    { name: 'timestamp', type: { type: 'long', logicalType: 'timestamp-millis' } },
-    { name: 'user_id', type: ['null', 'string'], default: null },
-    { name: 'session_id', type: 'string' },
-    { name: 'event_type', type: {
-      type: 'enum',
-      name: 'EventType',
-      symbols: ['PAGE_VIEW', 'CLICK', 'PURCHASE', 'CUSTOM']
-    }},
-    { name: 'properties', type: { type: 'map', values: 'string' } },
-    { name: 'context', type: {
-      type: 'record',
-      name: 'EventContext',
-      fields: [
-        { name: 'ip', type: 'string' },
-        { name: 'user_agent', type: 'string' },
-        { name: 'locale', type: 'string' },
-        { name: 'page_url', type: 'string' }
-      ]
-    }}
-  ]
-};
-```
-
-## The Ingestion Layer
-
-Our ingestion layer uses a custom Rust service for maximum throughput. Here's the core event receiver:
-
-```rust
-// src/ingestion/receiver.rs
-use tokio::net::TcpListener;
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use serde::Deserialize;
-use std::sync::Arc;
-use metrics::{counter, histogram};
-
-#[derive(Deserialize)]
-struct IncomingEvent {
-    event_id: String,
-    timestamp: i64,
-    user_id: Option<String>,
-    session_id: String,
-    event_type: String,
-    properties: HashMap<String, String>,
-}
-
-pub struct EventReceiver {
-    producer: Arc<FutureProducer>,
-    batch_size: usize,
-    flush_interval: Duration,
-}
-
-impl EventReceiver {
-    pub async fn start(&self, addr: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let listener = TcpListener::bind(addr).await?;
-        let mut batch = Vec::with_capacity(self.batch_size);
-
-        loop {
-            tokio::select! {
-                Ok((stream, _)) = listener.accept() => {
-                    let event = self.parse_event(stream).await?;
-                    batch.push(event);
-
-                    if batch.len() >= self.batch_size {
-                        self.flush_batch(&mut batch).await?;
-                    }
-                }
-                _ = tokio::time::sleep(self.flush_interval) => {
-                    if !batch.is_empty() {
-                        self.flush_batch(&mut batch).await?;
-                    }
-                }
-            }
-        }
-    }
-
-    async fn flush_batch(&self, batch: &mut Vec<IncomingEvent>) -> Result<(), KafkaError> {
-        let futures: Vec<_> = batch.drain(..).map(|event| {
-            let key = event.session_id.clone();
-            let payload = serde_json::to_vec(&event).unwrap();
-
-            self.producer.send(
-                FutureRecord::to("analytics-events")
-                    .key(&key)
-                    .payload(&payload),
-                Duration::from_secs(5),
-            )
-        }).collect();
-
-        let results = futures::future::join_all(futures).await;
-        counter!("events_flushed", results.len() as u64);
-
-        for result in results {
-            if let Err((err, _)) = result {
-                counter!("flush_errors", 1);
-                tracing::error!("Failed to produce message: {:?}", err);
-            }
-        }
-
-        Ok(())
-    }
-}
-```
-
-## Stream Processing with Flink
-
-The heart of our pipeline is the Flink job that performs windowed aggregations. We compute metrics over tumbling and sliding windows:
-
-```python
-# jobs/stream_processor.py
-from pyflink.datastream import StreamExecutionEnvironment
-from pyflink.table import StreamTableEnvironment, EnvironmentSettings
-from pyflink.table.window import Tumble, Slide
-from pyflink.table.expressions import col, lit, call
-
-def create_pipeline():
-    env = StreamExecutionEnvironment.get_execution_environment()
-    env.set_parallelism(4)
-    env.enable_checkpointing(60000)  # checkpoint every 60s
-
-    t_env = StreamTableEnvironment.create(env)
-
-    # Define Kafka source
-    t_env.execute_sql(\"\"\"
-        CREATE TABLE events (
-            event_id STRING,
-            event_timestamp TIMESTAMP(3),
-            user_id STRING,
-            session_id STRING,
-            event_type STRING,
-            properties MAP<STRING, STRING>,
-            WATERMARK FOR event_timestamp AS event_timestamp - INTERVAL '5' SECOND
-        ) WITH (
-            'connector' = 'kafka',
-            'topic' = 'analytics-events',
-            'properties.bootstrap.servers' = 'kafka:9092',
-            'format' = 'json',
-            'scan.startup.mode' = 'latest-offset'
-        )
-    \"\"\")
-
-    # 1-minute tumbling window: event counts by type
-    minute_counts = t_env.sql_query(\"\"\"
-        SELECT
-            event_type,
-            TUMBLE_START(event_timestamp, INTERVAL '1' MINUTE) AS window_start,
-            TUMBLE_END(event_timestamp, INTERVAL '1' MINUTE) AS window_end,
-            COUNT(*) AS event_count,
-            COUNT(DISTINCT user_id) AS unique_users,
-            COUNT(DISTINCT session_id) AS unique_sessions
-        FROM events
-        GROUP BY
-            event_type,
-            TUMBLE(event_timestamp, INTERVAL '1' MINUTE)
-    \"\"\")
-
-    # 5-minute sliding window (1-min slide): trend detection
-    trend_analysis = t_env.sql_query(\"\"\"
-        SELECT
-            event_type,
-            HOP_START(event_timestamp, INTERVAL '1' MINUTE, INTERVAL '5' MINUTE) AS window_start,
-            COUNT(*) AS event_count,
-            COUNT(*) / 5.0 AS events_per_minute
-        FROM events
-        GROUP BY
-            event_type,
-            HOP(event_timestamp, INTERVAL '1' MINUTE, INTERVAL '5' MINUTE)
-    \"\"\")
-
-    return minute_counts, trend_analysis
-```
-
-## Storage Layer
-
-We use TimescaleDB for efficient time-series storage with automatic partitioning:
-
-```sql
--- migrations/001_create_hypertables.sql
-CREATE TABLE event_aggregates (
-    time        TIMESTAMPTZ NOT NULL,
-    event_type  TEXT NOT NULL,
-    event_count BIGINT DEFAULT 0,
-    unique_users BIGINT DEFAULT 0,
-    unique_sessions BIGINT DEFAULT 0,
-    p50_latency DOUBLE PRECISION,
-    p99_latency DOUBLE PRECISION
-);
-
--- Convert to hypertable with 1-hour chunks
-SELECT create_hypertable('event_aggregates', 'time',
-    chunk_time_interval => INTERVAL '1 hour'
-);
-
--- Continuous aggregate for hourly rollups
-CREATE MATERIALIZED VIEW hourly_stats
-WITH (timescaledb.continuous) AS
-SELECT
-    time_bucket('1 hour', time) AS bucket,
-    event_type,
-    SUM(event_count) AS total_events,
-    SUM(unique_users) AS total_unique_users,
-    AVG(p50_latency) AS avg_p50_latency,
-    MAX(p99_latency) AS max_p99_latency
-FROM event_aggregates
-GROUP BY bucket, event_type;
-
--- Retention policy: keep raw data for 7 days
-SELECT add_retention_policy('event_aggregates', INTERVAL '7 days');
-
--- Compression policy: compress chunks older than 2 hours
-ALTER TABLE event_aggregates SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'event_type',
-    timescaledb.compress_orderby = 'time DESC'
-);
-SELECT add_compression_policy('event_aggregates', INTERVAL '2 hours');
-```
-
-## Real-Time API with GraphQL Subscriptions
-
-The serving layer exposes both query and subscription endpoints:
+Before starting the migration, ensure your project meets these requirements:
 
 ```ruby
-# app/graphql/subscriptions/analytics_subscription.rb
-module Subscriptions
-  class AnalyticsSubscription < GraphQL::Schema::Subscription
-    field :event_type, String, null: false
-    field :window_start, GraphQL::Types::ISO8601DateTime, null: false
-    field :event_count, Integer, null: false
-    field :unique_users, Integer, null: false
-    field :events_per_minute, Float, null: false
+# Gemfile
+gem 'react_on_rails', '~> 16.0'
+gem 'react_on_rails_pro', '~> 4.0'
+```
 
-    argument :event_types, [String], required: false
+```json
+// package.json — Required dependencies
+{
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-on-rails-pro": "latest",
+    "react-on-rails-pro-node-renderer": "latest",
+    "react-on-rails-rsc": "19.0.x"
+  }
+}
+```
 
-    def subscribe(event_types: nil)
-      context[:event_types] = event_types
-      :no_response
-    end
+> **Important:** RSC requires React 19. The RSC bundler APIs are unstable between React minor versions, so pin to a specific minor version (e.g., `19.0.x`). The `react-on-rails-rsc` package version tracks the React version it supports.
 
-    def update(event_types: nil)
-      return :no_update if event_types && !event_types.include?(object[:event_type])
+## Understanding the Three-Bundle Architecture
 
-      {
-        event_type: object[:event_type],
-        window_start: object[:window_start],
-        event_count: object[:event_count],
-        unique_users: object[:unique_users],
-        events_per_minute: object[:events_per_minute]
-      }
-    end
+A React on Rails app with RSC uses **three separate webpack bundles**, each with a distinct purpose:
+
+### Client Bundle (`client-bundle.js`)
+
+Runs in the browser. Contains only `'use client'` component implementations and their dependencies. Server component code never appears here — only lightweight references that tell React "this component was rendered on the server."
+
+```javascript
+// app/javascript/packs/client-bundle.js
+import ReactOnRails from 'react-on-rails-pro/client';
+
+ReactOnRails.setOptions({
+  traceTurbolinks: false,
+  turbo: false,
+});
+```
+
+### Server Bundle (`server-bundle.js`)
+
+Runs in the Node renderer for SSR (generating initial HTML). Server components are registered here, but wrapped with `RSCRoute` — a proxy that delegates to the RSC system rather than including the actual implementation.
+
+```javascript
+// app/javascript/generated/server-bundle-generated.js (auto-generated)
+import ReactOnRails from 'react-on-rails-pro';
+import registerServerComponent from 'react-on-rails-pro/registerServerComponent/server';
+
+// RSC components — registered via registerServerComponent
+// In the SSR bundle, these get wrapped with RSCRoute (not the actual code)
+registerServerComponent({ DashboardRSC, BlogPostRSC });
+
+// Client components — registered normally for SSR
+ReactOnRails.register({ DashboardSSR, HelloWorld });
+```
+
+### RSC Bundle (`rsc-bundle.js`)
+
+Runs in the Node renderer under the `react-server` condition. This is the only bundle that contains actual server component implementations. Files with `'use client'` are transformed into client references by the RSC WebpackLoader — their code is stripped and replaced with a reference ID.
+
+```javascript
+// In the RSC bundle, 'use client' files become:
+// Instead of the actual component code, the bundler emits:
+// registerClientReference(proxy, "file-path", "default")
+// The actual component code is only in the client bundle.
+```
+
+This three-bundle architecture is what makes RSC's bundle size reduction possible. The RSC bundle renders the server component tree into a serialized payload. The client bundle only receives references to client components it already has, plus the rendered output of server components.
+
+## Step 1: Enable RSC in Configuration
+
+### Rails Initializers
+
+```ruby
+# config/initializers/react_on_rails.rb
+ReactOnRails.configure do |config|
+  config.server_bundle_js_file = 'server-bundle.js'
+  config.auto_load_bundle = true
+  config.components_subdirectory = 'startup'
+end
+
+# config/initializers/react_on_rails_pro.rb
+ReactOnRailsPro.configure do |config|
+  config.enable_rsc_support = true
+  config.rsc_bundle_js_file = 'rsc-bundle.js'
+  config.server_renderer = 'NodeRenderer'
+  config.renderer_url = ENV.fetch('RENDERER_URL', 'http://localhost:3800')
+  config.rsc_payload_generation_url_path = 'rsc_payload/'
+end
+```
+
+### Webpack RSC Bundle Configuration
+
+Create `config/webpack/rscWebpackConfig.js`. This is the most critical configuration file for RSC:
+
+```javascript
+// config/webpack/rscWebpackConfig.js
+const { default: serverWebpackConfig } = require('./serverWebpackConfig');
+
+const configureRsc = () => {
+  const rscConfig = serverWebpackConfig(true);
+
+  // 1. Change entry point from server-bundle to rsc-bundle
+  rscConfig.entry = {
+    'rsc-bundle': rscConfig.entry['server-bundle']
+  };
+
+  // 2. Add the RSC WebpackLoader as a post-processing rule
+  //    enforce: 'post' ensures it runs AFTER SWC/Babel compiles TSX to JS
+  //    This gives the loader clean JavaScript to parse with acorn
+  rscConfig.module.rules.push({
+    test: /\\.(ts|tsx|js|jsx|mjs)$/,
+    enforce: 'post',
+    loader: 'react-on-rails-rsc/WebpackLoader',
+  });
+
+  // 3. Enable react-server resolve condition
+  //    This tells webpack to use RSC-specific package exports
+  rscConfig.resolve = {
+    ...rscConfig.resolve,
+    conditionNames: ['react-server', '...'],
+    alias: {
+      ...rscConfig.resolve?.alias,
+      // react-dom/server is not needed in the RSC bundle
+      'react-dom/server': false,
+    },
+  };
+
+  // 4. Set the output filename
+  rscConfig.output.filename = 'rsc-bundle.js';
+
+  return rscConfig;
+};
+
+module.exports = configureRsc;
+```
+
+> **Why `enforce: 'post'`?** When using SWC (via Shakapacker), the loader is configured as a function, not an array. The RSC WebpackLoader needs to process JavaScript output, not raw TypeScript/JSX. By adding it as a separate rule with `enforce: 'post'`, it runs after SWC has compiled everything to plain JavaScript.
+
+### Add RSC Plugin to Client and Server Configs
+
+The `RSCWebpackPlugin` must be added to both the client and server webpack configurations:
+
+```javascript
+// In clientWebpackConfig.js
+const { RSCWebpackPlugin } = require('react-on-rails-rsc/WebpackPlugin');
+
+// Add to plugins array:
+config.plugins.push(new RSCWebpackPlugin({ isServer: false }));
+
+// In serverWebpackConfig.js
+config.plugins.push(new RSCWebpackPlugin({ isServer: true }));
+```
+
+The plugin handles two critical tasks:
+- **Client config**: Generates `react-client-manifest.json` mapping `'use client'` components to their webpack chunk IDs
+- **Server config**: Adds all `'use client'` files as entry points to ensure they're included in the client bundle
+
+### Process Management (Procfile.dev)
+
+Each bundle needs its own watcher process:
+
+```bash
+# Procfile.dev
+web: bundle exec rails server -p 3000
+webpack: bin/shakapacker-dev-server
+
+# Server bundle watcher (separate from dev server)
+rails-server-assets: HMR=true SERVER_BUNDLE_ONLY=yes bin/shakapacker --watch
+
+# RSC bundle watcher
+rails-rsc-assets: HMR=true RSC_BUNDLE_ONLY=yes bin/shakapacker --watch
+
+# Node renderer for SSR and RSC execution
+renderer: node node-renderer.js
+```
+
+### Node Renderer Setup
+
+The Node renderer executes both the server bundle (for SSR) and the RSC bundle (for RSC payload generation):
+
+```javascript
+// node-renderer.js
+const { reactOnRailsProNodeRenderer } = require('react-on-rails-pro-node-renderer');
+
+const config = {
+  port: process.env.RENDERER_PORT || 3800,
+  workersCount: 2,
+  // Required: React.lazy() uses performance.now() internally
+  additionalContext: { URL, AbortController, performance },
+};
+
+reactOnRailsProNodeRenderer(config);
+```
+
+## Step 2: Add `'use client'` to Existing Components
+
+This is the most important step when enabling RSC. Once RSC support is active, React treats **all files as server components by default**. Any component that uses browser APIs, React hooks, or event handlers must be explicitly marked as a client component.
+
+### What Needs `'use client'`
+
+Add the directive to any file that:
+
+```typescript
+'use client';
+// Add this as the VERY FIRST line (before any imports)
+
+// Files that need 'use client':
+// - Uses useState, useEffect, useRef, useCallback, useMemo, useContext
+// - Uses event handlers (onClick, onChange, onSubmit, etc.)
+// - Uses browser APIs (window, document, localStorage, etc.)
+// - Uses third-party libraries that use hooks internally
+// - Uses @loadable/component or React.lazy()
+```
+
+### What Does NOT Need `'use client'`
+
+Leave the directive off for components that:
+
+```typescript
+// No 'use client' needed for:
+// - Pure presentational components that only receive and render props
+// - Components that only use: className, style, children, dangerouslySetInnerHTML
+// - Components that import and render other components (composition)
+// - Components that call server-side APIs or use async/await
+// - Utility functions for rendering (markdown, formatting, etc.)
+```
+
+### The `'use client'` Boundary Rule
+
+A critical concept: `'use client'` creates a **boundary**. Everything imported by a client component is automatically included in the client bundle, even if those imports don't have the directive themselves.
+
+```typescript
+// BlogPostRSC.tsx — Server component (no directive)
+import { renderMarkdown } from './renderMarkdown'; // Stays server-side
+import { BlogHeader } from './BlogHeader';          // Stays server-side
+import { InteractiveSection } from './InteractiveSection'; // Has 'use client'
+
+// renderMarkdown and BlogHeader code is ONLY in the RSC bundle
+// InteractiveSection code is in the client bundle
+
+export default async function BlogPostRSC({ post }) {
+  const html = renderMarkdown(post.content); // 350KB library, server-only
+  return (
+    <div>
+      <BlogHeader post={post} />
+      <article dangerouslySetInnerHTML={{ __html: html }} />
+      <InteractiveSection /> {/* Tiny client component */}
+    </div>
+  );
+}
+```
+
+```typescript
+// InteractiveSection.tsx — Client component
+'use client';
+
+import React, { useState } from 'react';
+
+// This component and ALL its imports go to the client bundle
+export function InteractiveSection() {
+  const [liked, setLiked] = useState(false);
+  return <button onClick={() => setLiked(!liked)}>Like</button>;
+}
+```
+
+**Key insight:** If `BlogHeader` was imported inside `InteractiveSection.tsx` instead of `BlogPostRSC.tsx`, it would be pulled into the client bundle — even though it's a simple presentational component. Always import shared components from the server component side when possible.
+
+## Step 3: Create Your First Server Component
+
+### Startup File Convention
+
+React on Rails uses the `startup/` directory for component auto-discovery. The file naming convention determines which bundle each component is registered in:
+
+```
+app/javascript/startup/
+  MyPageRSC.tsx          -> RSC bundle (no 'use client' = server component)
+  MyPageSSR.tsx          -> Server + Client bundles ('use client' = client component)
+  MyPageClient.client.tsx -> Client bundle only (hydration entry)
+  MyPageClient.server.tsx -> Server bundle only (SSR with ChunkExtractor)
+```
+
+For a server component, the startup file is minimal:
+
+```typescript
+// app/javascript/startup/MyPageRSC.tsx
+// No 'use client' directive — this is a server component
+export { default } from '../components/MyPageRSC';
+```
+
+This gets auto-registered via `registerServerComponent()` in the generated server bundle, which handles the three-bundle routing automatically.
+
+### The Server Component
+
+```typescript
+// app/javascript/components/MyPageRSC.tsx
+// No 'use client' — server component
+
+import React, { Suspense } from 'react';
+import { formatDate } from '../utils/formatDate'; // Heavy library, stays server-side
+
+interface Props {
+  data: { title: string; date: string };
+  getReactOnRailsAsyncProp: (name: string) => Promise<any>;
+}
+
+export default async function MyPageRSC({ data, getReactOnRailsAsyncProp }: Props) {
+  // This code runs ONLY on the server — never shipped to the browser
+  const formattedDate = formatDate(data.date);
+
+  return (
+    <div>
+      <h1>{data.title}</h1>
+      <time>{formattedDate}</time>
+
+      <Suspense fallback={<LoadingSkeleton />}>
+        <AsyncSection getReactOnRailsAsyncProp={getReactOnRailsAsyncProp} />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+### The Controller
+
+```ruby
+# app/controllers/pages_controller.rb
+class PagesController < ApplicationController
+  include ReactOnRailsPro::RSCPayloadRenderer
+  include ReactOnRailsPro::AsyncRendering
+
+  enable_async_react_rendering only: [:show_rsc]
+
+  def show_rsc
+    @page_data = { title: 'My Page', date: Date.today.iso8601 }
+    stream_view_containing_react_components(template: 'pages/show_rsc')
   end
 end
 ```
 
-## Performance Monitoring
+Three controller concerns are required:
+1. **`RSCPayloadRenderer`** — Handles RSC payload generation and the `rsc_payload/` endpoint
+2. **`AsyncRendering`** — Provides streaming support and the `enable_async_react_rendering` class method
+3. **`stream_view_containing_react_components`** — Replaces the default `render` to enable HTTP streaming
 
-We built a custom metrics collector in Go for monitoring pipeline health:
+### The View Template
 
-```go
-// cmd/metrics-collector/main.go
-package main
+```erb
+<%%= stream_react_component_with_async_props(
+  "MyPageRSC",
+  props: { data: @page_data },
+  prerender: true
+) do |emit|
+  # This block runs in a background thread
+  # Each emit.call sends a named data chunk to the React component
+  sleep 2  # Simulate slow database query
+  emit.call("related_items", {
+    items: ExpensiveQuery.find_related(@page_data[:id])
+  })
+end %>
+```
 
-import (
-	"context"
-	"fmt"
-	"log"
-	"time"
+## Step 4: Implement Streaming with Async Props
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"net/http"
-)
+The streaming pattern is what makes RSC truly powerful in Rails. Instead of waiting for all data before rendering, Rails streams data chunks as they resolve. React renders each chunk into the appropriate Suspense boundary.
 
-var (
-	eventsProcessed = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "pipeline_events_processed_total",
-			Help: "Total number of events processed by stage",
-		},
-		[]string{"stage", "event_type"},
-	)
+### How the Emit Pattern Works
 
-	processingLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "pipeline_processing_latency_seconds",
-			Help:    "Processing latency by pipeline stage",
-			Buckets: prometheus.ExponentialBuckets(0.001, 2, 15),
-		},
-		[]string{"stage"},
-	)
+```
+Timeline:
+  0ms   Rails starts streaming HTML + RSC payload
+  0ms   React renders server component with Suspense fallbacks
+  50ms  User sees the page with loading skeletons
+  1500ms  emit.call("related_posts", data) sends data
+  1500ms  React replaces <Suspense> fallback with actual content
+```
 
-	backpressureGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "pipeline_backpressure_ratio",
-			Help: "Ratio of input rate to processing capacity",
-		},
-		[]string{"stage"},
-	)
-)
+### The Async Server Component
 
-func init() {
-	prometheus.MustRegister(eventsProcessed, processingLatency, backpressureGauge)
+The component that receives streamed data uses `getReactOnRailsAsyncProp` — a function injected by React on Rails that returns a Promise resolving when Rails calls `emit.call` with the matching prop name:
+
+```typescript
+// app/javascript/components/AsyncRelatedPostsRSC.tsx
+// No 'use client' — server component
+
+import React from 'react';
+
+interface Props {
+  getReactOnRailsAsyncProp: (propName: string) => Promise<any>;
 }
 
-func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+export default async function AsyncRelatedPostsRSC({
+  getReactOnRailsAsyncProp
+}: Props) {
+  // This await resolves when Rails calls emit.call("related_posts", data)
+  const data = await getReactOnRailsAsyncProp('related_posts');
 
-	// Start metrics HTTP server
-	go func() {
-		http.Handle("/metrics", promhttp.Handler())
-		log.Fatal(http.ListenAndServe(":9090", nil))
-	}()
-
-	// Poll pipeline stages every 5 seconds
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			collectKafkaMetrics()
-			collectFlinkMetrics()
-			collectStorageMetrics()
-		}
-	}
-}
-
-func collectKafkaMetrics() {
-	// Query Kafka consumer group lag
-	lag, err := getConsumerLag("analytics-pipeline")
-	if err != nil {
-		log.Printf("Error collecting Kafka metrics: %v", err)
-		return
-	}
-
-	for topic, partitionLags := range lag {
-		var totalLag int64
-		for _, l := range partitionLags {
-			totalLag += l
-		}
-		backpressureGauge.WithLabelValues("kafka").Set(float64(totalLag))
-		fmt.Printf("Topic %s total lag: %d\\n", topic, totalLag)
-	}
+  return (
+    <section>
+      <h2>Related Posts</h2>
+      {data.posts.map(post => (
+        <article key={post.id}>
+          <h3>{post.title}</h3>
+          <p>{post.excerpt}</p>
+        </article>
+      ))}
+    </section>
+  );
 }
 ```
 
-## Deployment with Kubernetes
+### Composing with Suspense
 
-We deploy the entire pipeline using Helm charts with auto-scaling:
+Wrap async components in `<Suspense>` to show fallback UI while data streams in:
 
-```bash
-#!/bin/bash
-# deploy.sh — Rolling deployment with canary validation
+```typescript
+// In the parent server component:
+import React, { Suspense } from 'react';
+import AsyncRelatedPostsRSC from './AsyncRelatedPostsRSC';
+import { RelatedPostsSkeleton } from './RelatedPostsSkeleton';
 
-set -euo pipefail
+export default async function BlogPostRSC({ post, getReactOnRailsAsyncProp }) {
+  return (
+    <div>
+      <article>{/* ... main content ... */}</article>
 
-ENVIRONMENT=${1:-staging}
-VERSION=${2:-$(git rev-parse --short HEAD)}
-
-echo "Deploying pipeline v${VERSION} to ${ENVIRONMENT}"
-
-# Build and push container images
-docker build -t pipeline/ingestion:${VERSION} -f docker/ingestion.Dockerfile .
-docker build -t pipeline/processor:${VERSION} -f docker/processor.Dockerfile .
-docker push pipeline/ingestion:${VERSION}
-docker push pipeline/processor:${VERSION}
-
-# Deploy with Helm
-helm upgrade --install analytics-pipeline ./helm/analytics-pipeline \\
-  --namespace analytics \\
-  --set image.tag=${VERSION} \\
-  --set environment=${ENVIRONMENT} \\
-  --set ingestion.replicas=3 \\
-  --set processor.parallelism=8 \\
-  --set storage.retention=7d \\
-  --values ./helm/values-${ENVIRONMENT}.yaml \\
-  --wait --timeout 10m
-
-# Canary validation
-echo "Running canary checks..."
-kubectl wait --for=condition=ready pod -l app=ingestion -n analytics --timeout=120s
-
-HEALTH=$(curl -s http://ingestion.analytics.svc/health | jq -r '.status')
-if [ "$HEALTH" != "healthy" ]; then
-  echo "Canary check failed! Rolling back..."
-  helm rollback analytics-pipeline -n analytics
-  exit 1
-fi
-
-echo "Deployment successful!"
+      {/* User sees RelatedPostsSkeleton immediately */}
+      {/* Replaced with real content when emit.call resolves */}
+      <Suspense fallback={<RelatedPostsSkeleton />}>
+        <AsyncRelatedPostsRSC
+          getReactOnRailsAsyncProp={getReactOnRailsAsyncProp}
+        />
+      </Suspense>
+    </div>
+  );
+}
 ```
 
-## Lessons Learned
+### Multiple Concurrent Streams
 
-After running this pipeline in production for 18 months, here are our key takeaways:
+You can emit multiple async props independently. Each resolves its own Suspense boundary:
 
-1. **Schema evolution is critical** — Use a schema registry from day one. We broke our pipeline twice with incompatible schema changes before adding Avro with compatibility checks.
+```erb
+<%%= stream_react_component_with_async_props(
+  "DashboardRSC",
+  props: { user: @user },
+  prerender: true
+) do |emit|
+  # These can resolve in any order — each streams independently
+  Thread.new { emit.call("notifications", Notification.recent(@user.id)) }
+  Thread.new { emit.call("analytics", Analytics.summary(@user.id)) }
+  Thread.new { emit.call("recommendations", Recommender.for(@user.id)) }
+end %>
+```
 
-2. **Backpressure handling matters** — Without proper backpressure, a spike in traffic causes cascading failures. Our Rust ingestion layer applies adaptive rate limiting based on Kafka producer queue depth.
+## Step 5: Migration Strategy for Existing Pages
 
-3. **Idempotency everywhere** — Network partitions and retries are inevitable. Every stage in our pipeline uses idempotency keys to ensure exactly-once semantics without transactions.
+You don't need to migrate everything at once. React on Rails supports all three rendering patterns side by side:
 
-4. **Monitor the monitors** — Our metrics collector itself needs monitoring. We use a separate Prometheus instance to watch the primary monitoring stack.
+### Pattern 1: Keep as Client Component (No Change)
 
-5. **Start simple, add complexity later** — We began with a single Kafka topic and a Python consumer. The Flink jobs and Rust ingestion layer came later when we actually needed the throughput.
+For pages that are highly interactive (forms, real-time updates, complex state), keep them as client components. No migration needed.
 
-The full source code is available on our engineering blog, along with Terraform modules for the cloud infrastructure.
+```typescript
+// startup/FormPage.tsx
+'use client';
+export { default } from '../components/FormPage';
+```
+
+### Pattern 2: Convert to RSC (Server Rendering, Zero Client JS)
+
+For pages that are primarily content (blogs, documentation, product pages), convert to RSC. The component code and all rendering libraries stay server-side.
+
+```typescript
+// Before (client component — all libraries shipped to browser):
+'use client';
+import { marked } from 'marked';
+import hljs from 'highlight.js';
+
+export default function BlogPost({ post }) {
+  const html = marked(post.content); // 350KB shipped to client
+  return <article dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+// After (server component — libraries stay on server):
+// No 'use client'
+import { marked } from 'marked';
+import hljs from 'highlight.js';
+
+export default async function BlogPost({ post }) {
+  const html = marked(post.content); // 350KB stays server-side
+  return <article dangerouslySetInnerHTML={{ __html: html }} />;
+}
+```
+
+### Pattern 3: Hybrid (Server Component with Client Islands)
+
+The most common pattern. The page shell is a server component, with small `'use client'` components for interactive elements:
+
+```typescript
+// Server component (page shell)
+import { HeavyChartLibrary } from 'chart-lib';    // Server-only
+import { InteractiveFilter } from './Filter';       // 'use client'
+import { ShareButton } from './ShareButton';         // 'use client'
+
+export default async function AnalyticsPage({ data }) {
+  const chartSvg = HeavyChartLibrary.render(data);  // Server-only rendering
+
+  return (
+    <div>
+      <InteractiveFilter />           {/* ~3KB client JS */}
+      <div dangerouslySetInnerHTML={{ __html: chartSvg }} />
+      <ShareButton url={data.url} /> {/* ~1KB client JS */}
+    </div>
+  );
+}
+// Total client JS: ~4KB instead of ~200KB+
+```
+
+## Common Migration Patterns
+
+### Converting `useEffect` Data Fetching to Async Props
+
+**Before (client-side fetching):**
+
+```typescript
+'use client';
+import { useState, useEffect } from 'react';
+
+export default function Dashboard({ userId }) {
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    fetch(`/api/users/${userId}/stats`)
+      .then(r => r.json())
+      .then(setStats);
+  }, [userId]);
+
+  if (!stats) return <Spinner />;
+  return <StatsGrid stats={stats} />;
+}
+```
+
+**After (RSC with streaming):**
+
+```typescript
+// No 'use client'
+import { Suspense } from 'react';
+
+export default async function Dashboard({ userId, getReactOnRailsAsyncProp }) {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <AsyncStats getReactOnRailsAsyncProp={getReactOnRailsAsyncProp} />
+    </Suspense>
+  );
+}
+
+// Separate async server component
+async function AsyncStats({ getReactOnRailsAsyncProp }) {
+  const stats = await getReactOnRailsAsyncProp('user_stats');
+  return <StatsGrid stats={stats} />;
+}
+```
+
+```erb
+<%%= stream_react_component_with_async_props(
+  "Dashboard",
+  props: { userId: @user.id },
+  prerender: true
+) do |emit|
+  stats = UserStats.compute(@user.id)
+  emit.call("user_stats", stats)
+end %>
+```
+
+### Handling Components That Need Both Server and Client Behavior
+
+Sometimes a component needs server-side rendering for heavy computation but client-side interactivity for user actions. Split it into two:
+
+```typescript
+// ServerRenderedChart.tsx — No 'use client' (server component)
+import { ChartLibrary } from 'heavy-chart-lib'; // 500KB, server-only
+
+interface Props {
+  data: number[];
+}
+
+export function ServerRenderedChart({ data }: Props) {
+  const svg = ChartLibrary.renderToSVG(data);
+  return (
+    <div>
+      <div dangerouslySetInnerHTML={{ __html: svg }} />
+      <ChartControls data={data} />
+    </div>
+  );
+}
+```
+
+```typescript
+// ChartControls.tsx — 'use client' (client component)
+'use client';
+import { useState } from 'react';
+
+export function ChartControls({ data }: { data: number[] }) {
+  const [zoom, setZoom] = useState(1);
+  // Lightweight client-side interactions only
+  return (
+    <div>
+      <button onClick={() => setZoom(z => z * 1.2)}>Zoom In</button>
+      <button onClick={() => setZoom(z => z / 1.2)}>Zoom Out</button>
+    </div>
+  );
+}
+```
+
+## Verifying Your Migration
+
+### Check Bundle Sizes in DevTools
+
+The most tangible benefit of RSC is measurable in the browser's Network tab:
+
+1. **Before RSC:** Open DevTools Network tab, filter by JS. Note the total JavaScript transferred.
+2. **After RSC:** Same page with RSC. The server-only libraries should be completely absent from the JS waterfall.
+
+For example, a blog page using `marked` (50KB) and `highlight.js` (300KB+):
+- **Client component version:** ~350KB+ of rendering libraries in the JS payload
+- **RSC version:** 0KB of those libraries — only the tiny interactive components (~2-3KB)
+
+### Verify Streaming Behavior
+
+1. Open the Network tab and watch the HTML response
+2. The initial response arrives immediately with Suspense fallbacks
+3. Additional `<script>` tags stream in as each `emit.call` resolves
+4. React swaps the fallbacks with real content — no full-page re-render
+
+### Check Server Component Isolation
+
+In the browser console, try accessing a server-only module:
+
+```javascript
+// This should NOT be available in the browser:
+import('highlight.js').then(m => console.log(m));
+// If RSC is working correctly, this import will fail or not exist
+// in the client bundle at all
+```
+
+## Troubleshooting
+
+### "Module not found" in RSC Bundle
+
+If the RSC bundle fails to compile with module resolution errors, ensure the `conditionNames` includes `'react-server'`:
+
+```javascript
+// rscWebpackConfig.js
+rscConfig.resolve.conditionNames = ['react-server', '...'];
+```
+
+The `'...'` is important — it tells webpack to also check the default conditions after checking `react-server`.
+
+### Hydration Mismatches
+
+If you see hydration errors after migrating to RSC, the most common cause is a component that uses browser APIs without `'use client'`. Check for:
+
+- `window`, `document`, `localStorage` references
+- `useEffect`, `useState`, or other hooks
+- Event handler props (`onClick`, `onChange`)
+
+All of these require the `'use client'` directive.
+
+### SWC Loader Compatibility
+
+When using SWC (the default transpiler in Shakapacker), the RSC WebpackLoader must run **after** SWC compilation. Shakapacker configures SWC as a function-based loader, not an array:
+
+```javascript
+// Shakapacker sets: rule.use = (info) => ({ loader: 'swc-loader', options })
+// NOT: rule.use = [{ loader: 'swc-loader', options }]
+
+// This is why the RSC loader must be a SEPARATE rule with enforce: 'post'
+// rather than being appended to the existing SWC rule
+rscConfig.module.rules.push({
+  test: /\\.(ts|tsx|js|jsx|mjs)$/,
+  enforce: 'post',
+  loader: 'react-on-rails-rsc/WebpackLoader',
+});
+```
+
+### Performance: Script Loading Strategy
+
+For streaming pages, use `async` (not `defer`) for script loading. The `defer` attribute delays execution until the entire HTML document is parsed — which defeats the purpose of streaming, since streamed chunks arrive after the initial HTML.
+
+```ruby
+# config/initializers/react_on_rails.rb
+ReactOnRails.configure do |config|
+  # Use :async for streaming pages (default in Shakapacker >= 8.2.0)
+  config.generated_component_packs_loading_strategy = :async
+end
+```
+
+### Node Renderer Context
+
+If server components crash with `ReferenceError: performance is not defined`, add missing globals to the Node renderer's VM context:
+
+```javascript
+// node-renderer.js
+const config = {
+  additionalContext: {
+    URL,
+    AbortController,
+    performance, // Required by React.lazy() in development
+  },
+};
+```
+
+## Summary
+
+Migrating to RSC with React on Rails is an incremental process:
+
+1. **Enable RSC support** — Configure the three-bundle architecture with webpack and Rails initializers
+2. **Add `'use client'` to existing components** — Mark all interactive components explicitly
+3. **Convert content-heavy pages** — Move rendering-only pages to server components
+4. **Add streaming for slow data** — Use `stream_react_component_with_async_props` with Suspense
+5. **Measure the impact** — Check bundle sizes and streaming behavior in DevTools
+
+The key mental model: **server components are the default, client components are the opt-in exception.** Push interactivity to the leaves of your component tree, and let the server handle everything else. Your users get faster page loads, less JavaScript to parse, and a progressively-rendered experience — all while your Rails backend remains the single source of truth for data.
     MARKDOWN
   }.freeze
 
   RELATED_POSTS = [
     {
       id: 2,
-      title: "Zero-Downtime Database Migrations at Scale",
-      excerpt: "How we migrate tables with 500M+ rows without locking or downtime, using ghost tables and incremental backfills.",
-      date: "2025-01-08",
-      tags: %w[database postgres migrations]
+      title: "Understanding the RSC Three-Bundle Architecture",
+      excerpt: "A deep dive into how React on Rails manages client, server, and RSC bundles with webpack — and why each bundle exists.",
+      date: "2025-06-08",
+      tags: %w[react-on-rails rsc webpack]
     },
     {
       id: 3,
-      title: "Taming WebSocket Connections with Connection Pooling",
-      excerpt: "Lessons from managing 200K concurrent WebSocket connections with a custom Go-based connection manager.",
-      date: "2024-12-22",
-      tags: %w[websockets go networking]
+      title: "Streaming Patterns for Rails and React",
+      excerpt: "Advanced streaming techniques using Suspense boundaries, concurrent data loading, and progressive rendering in React on Rails.",
+      date: "2025-05-22",
+      tags: %w[streaming suspense rails]
     },
     {
       id: 4,
-      title: "From Monolith to Micro-Frontends: A Migration Story",
-      excerpt: "A practical guide to decomposing a large React SPA into independently deployable micro-frontends using Module Federation.",
-      date: "2024-12-15",
-      tags: %w[react micro-frontends webpack]
+      title: "Client Components vs Server Components: When to Use Which",
+      excerpt: "A practical decision framework for choosing between 'use client' components and server components in your React on Rails app.",
+      date: "2025-05-15",
+      tags: %w[react rsc architecture]
     },
     {
       id: 5,
-      title: "Implementing RBAC with Cedar Policy Language",
-      excerpt: "Building a fine-grained authorization system using Amazon's Cedar policy language for complex multi-tenant permissions.",
-      date: "2024-12-01",
-      tags: %w[security authorization cedar]
+      title: "Optimizing Bundle Size with React Server Components",
+      excerpt: "How to identify heavy client-side libraries and move them server-side with RSC, with real-world before and after measurements.",
+      date: "2025-05-01",
+      tags: %w[performance rsc optimization]
     }
   ].freeze
 
