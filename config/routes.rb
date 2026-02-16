@@ -12,6 +12,11 @@ Rails.application.routes.draw do
   get '/search/client', to: 'restaurants#search_client'  # V2: Loadable components, client-side fetch
   get '/search/rsc', to: 'restaurants#search_rsc'        # V3: RSC streaming
 
+  # Blog post routes — three versions demonstrating bundle size differences
+  get '/blog/ssr', to: 'blog#post_ssr'       # V1: marked + highlight.js shipped to client
+  get '/blog/client', to: 'blog#post_client'  # V2: Libraries loaded in async chunk
+  get '/blog/rsc', to: 'blog#post_rsc'        # V3: Libraries stay server-side (0KB to client)
+
   # Dashboard route (Task 5)
   get '/dashboard', to: 'dashboard#index'
   get '/comparison', to: 'dashboard#comparison'
@@ -25,6 +30,12 @@ Rails.application.routes.draw do
         get :specials
         get :trending
         get :rating
+      end
+    end
+
+    resources :blog_posts, only: [] do
+      member do
+        get :related_posts
       end
     end
 

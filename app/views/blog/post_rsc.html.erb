@@ -1,0 +1,6 @@
+<%= stream_react_component_with_async_props("BlogPostRSC", props: { post: @post_data }, prerender: true) do |emit|
+  sleep 1.5  # Simulate slow recommendation engine
+  emit.call("related_posts", {
+    posts: BlogData.related_posts(@post_data[:id])
+  })
+end %>
