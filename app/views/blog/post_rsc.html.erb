@@ -1,0 +1,14 @@
+<%= stream_react_component_with_async_props("BlogPostRSC", props: { post: @post_meta }, prerender: true) do |emit|
+  # Simulate slow content fetch (e.g., CMS API, database query).
+  # In RSC, this delay only blocks the content stream — the header and
+  # article skeleton have already been sent to the browser by this point.
+  sleep(@content_delay) if @content_delay > 0
+  content = BlogData.find_post(@post_meta[:id])[:content]
+  emit.call("post_content", { content: content })
+
+  sleep 1.5  # Simulate slow recommendation engine
+
+  emit.call("related_posts", {
+    posts: BlogData.related_posts(@post_meta[:id])
+  })
+end %>

@@ -16,9 +16,10 @@ gem 'importmap-rails'
 gem 'turbo-rails'
 gem 'stimulus-rails'
 
-# React on Rails - local development from v16.3 branch
+# React on Rails
 gem 'react_on_rails', path: '/mnt/ssd/react_on_rails_v16.3/react_on_rails'
 gem 'react_on_rails_pro', path: '/mnt/ssd/react_on_rails_v16.3/react_on_rails_pro'
+gem 'httpx', path: '/mnt/ssd/open-source/httpx'
 
 # Shakapacker for webpack integration
 gem 'shakapacker', '~> 9.5'

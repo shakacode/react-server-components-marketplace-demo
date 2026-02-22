@@ -1,0 +1,160 @@
+#!/usr/bin/env node
+
+import { parseArgs } from 'node:util';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import puppeteer from 'puppeteer';
+import { DEFAULTS, PAGES } from './lib/constants.mjs';
+import { measurePage } from './lib/runner.mjs';
+import { aggregateRuns } from './lib/stats.mjs';
+import { formatComparisonTable, formatJsBreakdownTable } from './lib/formatters.mjs';
+
+const { values: args } = parseArgs({
+  options: {
+    url: { type: 'string', default: DEFAULTS.baseUrl },
+    pages: { type: 'string', default: 'ssr,client,rsc' },
+    iterations: { type: 'string', short: 'n', default: String(DEFAULTS.iterations) },
+    warmup: { type: 'string', short: 'w', default: String(DEFAULTS.warmup) },
+    output: { type: 'string', short: 'o' },
+    label: { type: 'string', short: 'l', default: '' },
+    throttle: { type: 'boolean', default: false },
+    headless: { type: 'boolean', default: true },
+    verbose: { type: 'boolean', short: 'v', default: false },
+  },
+  strict: false,
+});
+
+const baseUrl = args.url;
+const pageKeys = args.pages.split(',').map((s) => s.trim());
+const iterations = parseInt(args.iterations, 10);
+const warmup = parseInt(args.warmup, 10);
+const verbose = args.verbose;
+
+async function healthCheck(url) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function main() {
+  console.log('\nWeb Vitals Measurement Tool');
+  console.log('==========================\n');
+  console.log(`Base URL:    ${baseUrl}`);
+  console.log(`Pages:       ${pageKeys.join(', ')}`);
+  console.log(`Iterations:  ${iterations} (warmup: ${warmup})`);
+  console.log(`Throttle:    ${args.throttle ? 'ON (4x CPU, Slow 3G)' : 'OFF'}`);
+  if (args.label) console.log(`Label:       ${args.label}`);
+  console.log('');
+
+  // Health check
+  const firstPage = PAGES[pageKeys[0]];
+  if (!firstPage) {
+    console.error(`Unknown page key: ${pageKeys[0]}. Valid: ${Object.keys(PAGES).join(', ')}`);
+    process.exit(1);
+  }
+
+  const healthy = await healthCheck(`${baseUrl}${firstPage.path}`);
+  if (!healthy) {
+    console.error(`Server not reachable at ${baseUrl}. Is it running? (try: bin/dev)`);
+    process.exit(1);
+  }
+  console.log('Server health check passed.\n');
+
+  // Launch browser
+  const browser = await puppeteer.launch({
+    headless: args.headless ? 'new' : false,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  const userAgent = await browser.userAgent();
+  const allResults = {};
+
+  for (const key of pageKeys) {
+    const config = PAGES[key];
+    if (!config) {
+      console.warn(`Skipping unknown page key: ${key}`);
+      continue;
+    }
+
+    console.log(`Measuring ${config.label} (${iterations} iterations)...`);
+    const runs = [];
+
+    for (let i = 0; i < iterations; i++) {
+      const isWarmup = i < warmup;
+      const prefix = isWarmup ? `  [warmup ${i + 1}/${warmup}]` : `  [run ${i - warmup + 1}/${iterations - warmup}]`;
+
+      if (verbose) console.log(`${prefix} starting...`);
+
+      const result = await measurePage(browser, config, {
+        baseUrl,
+        timeout: DEFAULTS.timeout,
+        throttle: args.throttle,
+        verbose,
+      });
+
+      runs.push(result);
+
+      if (verbose) {
+        console.log(`${prefix} FCP=${result.fcp?.toFixed(0)}ms LCP=${result.lcp?.toFixed(0)}ms Hydration=${result.hydrationDuration?.toFixed(0)}ms`);
+      } else {
+        process.stdout.write('.');
+      }
+    }
+    if (!verbose) console.log(' done');
+
+    const aggregated = aggregateRuns(runs, warmup);
+    if (aggregated) {
+      aggregated._label = config.label;
+      allResults[key] = aggregated;
+    }
+  }
+
+  await browser.close();
+
+  // Display comparison table
+  console.log('\n' + formatComparisonTable(allResults));
+
+  // Display JS breakdowns if verbose
+  if (verbose) {
+    for (const [version, data] of Object.entries(allResults)) {
+      const breakdown = formatJsBreakdownTable(version, data);
+      if (breakdown) console.log(breakdown);
+    }
+  }
+
+  // Save JSON output
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const outputDir = join(process.cwd(), '.vitals-results');
+  const outputFile = args.output || join(outputDir, `${timestamp}${args.label ? '-' + args.label : ''}.json`);
+
+  const output = {
+    metadata: {
+      timestamp: new Date().toISOString(),
+      label: args.label || null,
+      baseUrl,
+      iterations,
+      warmup,
+      throttle: args.throttle,
+      userAgent,
+    },
+    results: {},
+  };
+
+  for (const [key, data] of Object.entries(allResults)) {
+    const { _label, ...metrics } = data;
+    output.results[key] = metrics;
+  }
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputFile, JSON.stringify(output, null, 2));
+  console.log(`\nResults saved to: ${outputFile}`);
+}
+
+main().catch((err) => {
+  console.error('\nFatal error:', err.message);
+  if (verbose) console.error(err.stack);
+  process.exit(1);
+});

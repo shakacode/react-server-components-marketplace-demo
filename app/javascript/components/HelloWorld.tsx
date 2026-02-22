@@ -60,6 +60,25 @@ const HelloWorld: React.FC<HelloWorldProps> = ({ name }) => {
         </a>
       </div>
       <hr style={{ margin: '20px 0' }} />
+      <h2>Blog Post Versions (Bundle Size Demo)</h2>
+      <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '12px' }}>
+        Demonstrates RSC eliminating 350KB+ of marked + highlight.js from the client bundle
+      </p>
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+        <a href="/blog/ssr" style={{ padding: '8px 16px', background: '#d97706', color: 'white', borderRadius: '6px', textDecoration: 'none' }}>
+          V1: Full SSR
+        </a>
+        <a href="/blog/client" style={{ padding: '8px 16px', background: '#2563eb', color: 'white', borderRadius: '6px', textDecoration: 'none' }}>
+          V2: Client Async
+        </a>
+        <a href="/blog/rsc" style={{ padding: '8px 16px', background: '#059669', color: 'white', borderRadius: '6px', textDecoration: 'none' }}>
+          V3: RSC Streaming
+        </a>
+        <a href="/blog/rsc-simple" style={{ padding: '8px 16px', background: '#0d9488', color: 'white', borderRadius: '6px', textDecoration: 'none' }}>
+          V4: RSC Simple
+        </a>
+      </div>
+      <hr style={{ margin: '20px 0' }} />
       <p>React on Rails is working with TypeScript!</p>
       <p>Count: {count}</p>
       <button

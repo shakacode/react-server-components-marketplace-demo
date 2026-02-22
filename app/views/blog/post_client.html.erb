@@ -1,0 +1,7 @@
+<% blog = react_component_hash("BlogPostClient", props: { post: @post_data }, prerender: true) %>
+<% content_for :head do %>
+  <%= blog["linkTags"] %>
+  <%= blog["scriptTags"] %>
+  <%= blog["styleTags"] %>
+<% end %>
+<%= blog["componentHtml"] %>
