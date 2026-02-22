@@ -1,4 +1,4 @@
-'use client';
+// No "use client" — this is a server component (RSC bundle)
 
 import React from 'react';
 import { BlogPost, RelatedPost } from '../../types/blog';
@@ -16,13 +16,13 @@ interface Props {
   related_posts: RelatedPost[];
 }
 
-export default function BlogPostSSR({ post, related_posts }: Props) {
+export default function BlogPostRSCSimple({ post, related_posts }: Props) {
   const html = renderMarkdown(post.content);
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-8">
-      <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 mb-6">
-        V1: Full SSR — marked + highlight.js (350KB+) shipped to client for hydration
+      <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 mb-6">
+        V4: RSC Simple — marked + highlight.js stay server-side, all data passed upfront (no streaming)
       </p>
 
       <BookmarkShareBar />

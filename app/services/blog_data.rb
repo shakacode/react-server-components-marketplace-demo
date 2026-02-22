@@ -9,6 +9,20 @@ class BlogData
     reading_time: "18 min read",
     tags: %w[react-on-rails rsc streaming migration],
     excerpt: "A complete guide to migrating your React on Rails application from traditional client-side rendering to React Server Components with streaming.",
+    toc_entries: [
+      { id: "why-migrate-to-rsc", title: "Why Migrate to RSC?", level: 2 },
+      { id: "prerequisites", title: "Prerequisites", level: 2 },
+      { id: "understanding-the-three-bundle-architecture", title: "Understanding the Three-Bundle Architecture", level: 2 },
+      { id: "step-1-enable-rsc-in-configuration", title: "Step 1: Enable RSC in Configuration", level: 2 },
+      { id: "step-2-add-use-client-to-existing-components", title: "Step 2: Add 'use client' to Existing Components", level: 2 },
+      { id: "step-3-create-your-first-server-component", title: "Step 3: Create Your First Server Component", level: 2 },
+      { id: "step-4-implement-streaming-with-async-props", title: "Step 4: Implement Streaming with Async Props", level: 2 },
+      { id: "step-5-migration-strategy-for-existing-pages", title: "Step 5: Migration Strategy for Existing Pages", level: 2 },
+      { id: "common-migration-patterns", title: "Common Migration Patterns", level: 2 },
+      { id: "verifying-your-migration", title: "Verifying Your Migration", level: 2 },
+      { id: "troubleshooting", title: "Troubleshooting", level: 2 },
+      { id: "summary", title: "Summary", level: 2 }
+    ],
     content: <<~MARKDOWN
 ## Why Migrate to RSC?
 

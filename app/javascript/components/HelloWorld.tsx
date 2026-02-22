@@ -72,7 +72,10 @@ const HelloWorld: React.FC<HelloWorldProps> = ({ name }) => {
           V2: Client Async
         </a>
         <a href="/blog/rsc" style={{ padding: '8px 16px', background: '#059669', color: 'white', borderRadius: '6px', textDecoration: 'none' }}>
-          V3: RSC (0KB libs)
+          V3: RSC Streaming
+        </a>
+        <a href="/blog/rsc-simple" style={{ padding: '8px 16px', background: '#0d9488', color: 'white', borderRadius: '6px', textDecoration: 'none' }}>
+          V4: RSC Simple
         </a>
       </div>
       <hr style={{ margin: '20px 0' }} />

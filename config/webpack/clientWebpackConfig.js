@@ -59,6 +59,26 @@ const configureClient = () => {
     stream: false,
   };
 
+  // Isolate heavy markdown/syntax-highlighting libraries into their own chunk.
+  // Without this, webpack's default `defaultVendors` cacheGroup bundles marked +
+  // highlight.js into the same shared vendor chunk as React. RSC client components
+  // (InteractiveSection, BookmarkShareBar, etc.) need React, so they'd pull in
+  // the entire vendor chunk — including ~350KB of markdown libraries they never use.
+  // By giving this group higher priority than defaultVendors (-10), webpack splits
+  // these libraries into a separate chunk that only SSR/Client pages load.
+  const splitChunks = clientConfig.optimization.splitChunks || {};
+  splitChunks.cacheGroups = {
+    ...splitChunks.cacheGroups,
+    markdownLibs: {
+      test: /[\\/]node_modules[\\/](marked|highlight\.js|marked-highlight)[\\/]/,
+      name: 'markdown-libs',
+      chunks: 'all',
+      priority: 10,
+      enforce: true,
+    },
+  };
+  clientConfig.optimization.splitChunks = splitChunks;
+
   return overrideCssModulesConfig(clientConfig);
 };
 

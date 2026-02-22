@@ -5,7 +5,11 @@ import loadable from '@loadable/component';
 import { BlogPost } from '../../types/blog';
 import { BlogPostHeader } from './BlogPostHeader';
 import { BlogContentSkeleton } from './BlogContentSkeleton';
+import { BookmarkShareBar } from './BookmarkShareBar';
+import { TableOfContents } from './TableOfContents';
+import { ReadingModeToggle } from './ReadingModeToggle';
 import { InteractiveSection } from './InteractiveSection';
+import { INPOverlay } from './INPOverlay';
 
 const AsyncBlogContent = loadable(
   () => import('./AsyncBlogContent'),
@@ -23,11 +27,19 @@ export default function BlogPostClient({ post }: Props) {
         V2: Client Components — Libraries loaded in async chunk after page load
       </p>
 
+      <BookmarkShareBar />
+
       <BlogPostHeader post={post} />
+
+      <ReadingModeToggle />
+
+      <TableOfContents entries={post.toc_entries} />
 
       <AsyncBlogContent postId={post.id} content={post.content} />
 
       <InteractiveSection />
+
+      <INPOverlay />
     </div>
   );
 }
