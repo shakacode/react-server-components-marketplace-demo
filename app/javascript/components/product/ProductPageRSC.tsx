@@ -20,13 +20,11 @@ import { Product } from '../../types/product';
 import { ProductImageGallery } from './ProductImageGallery';
 import { ProductInfo } from './ProductInfo';
 import { AddToCartSection } from './AddToCartSection';
-import { ProductDescription } from './ProductDescription';
-import { ProductFeatures } from './ProductFeatures';
-import { ProductSpecs } from './ProductSpecs';
+import AsyncProductDetailsRSC from './AsyncProductDetailsRSC';
 import AsyncReviewStatsRSC from './AsyncReviewStatsRSC';
 import AsyncReviewsRSC from './AsyncReviewsRSC';
 import AsyncRelatedProductsRSC from './AsyncRelatedProductsRSC';
-import { ReviewStatsSkeleton, ReviewsSkeleton, RelatedProductsSkeleton } from './ProductSkeletons';
+import { ProductDetailsSkeleton, ReviewStatsSkeleton, ReviewsSkeleton, RelatedProductsSkeleton } from './ProductSkeletons';
 import { INPOverlay } from '../blog/INPOverlay';
 
 interface Props {
@@ -58,14 +56,10 @@ export default function ProductPageRSC({ product, getReactOnRailsAsyncProp }: Pr
           </div>
         </div>
 
-        {/* Product description — rendered server-side, marked + highlight.js never ship to client */}
-        <ProductDescription description={product.description} />
-
-        {/* Features — display-only, stays server-side */}
-        <ProductFeatures features={product.features} />
-
-        {/* Specifications — display-only, stays server-side */}
-        <ProductSpecs specs={product.specs} />
+        {/* Product details — below the fold, streamed to prioritize hero section for LCP */}
+        <Suspense fallback={<ProductDetailsSkeleton />}>
+          <AsyncProductDetailsRSC getReactOnRailsAsyncProp={getReactOnRailsAsyncProp} />
+        </Suspense>
 
         {/* Reviews section — streams as data resolves */}
         <section className="border-t border-gray-200 pt-8 mt-8">

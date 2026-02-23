@@ -1,6 +1,14 @@
 <%= stream_react_component_with_async_props("ProductPageRSC",
     props: { product: @product_data }, prerender: true) do |emit|
 
+  # Stream product details first (below-the-fold: description, features, specs)
+  # Emitted immediately — prioritizes hero section in initial stream for faster LCP
+  emit.call("product_details", {
+    description: @product.description,
+    features: @product.features,
+    specs: @product.specs,
+  })
+
   # Stream review statistics (rating distribution aggregation)
   emit.call("review_stats", @product.review_stats)
 

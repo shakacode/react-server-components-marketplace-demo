@@ -1,5 +1,35 @@
 import React from 'react';
 
+export function ProductDetailsSkeleton() {
+  return (
+    <div className="animate-pulse space-y-8 mb-8">
+      {/* Description skeleton */}
+      <section className="border-t border-gray-200 pt-8">
+        <div className="h-6 w-40 bg-gray-200 rounded mb-4" />
+        <div className="space-y-3">
+          <div className="h-4 w-full bg-gray-200 rounded" />
+          <div className="h-4 w-11/12 bg-gray-200 rounded" />
+          <div className="h-4 w-4/5 bg-gray-200 rounded" />
+          <div className="h-4 w-full bg-gray-200 rounded" />
+          <div className="h-4 w-3/4 bg-gray-200 rounded" />
+        </div>
+      </section>
+      {/* Features skeleton */}
+      <section className="border-t border-gray-200 pt-8">
+        <div className="h-6 w-32 bg-gray-200 rounded mb-4" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="w-5 h-5 bg-gray-200 rounded-full flex-shrink-0" />
+              <div className="h-4 w-full bg-gray-200 rounded" />
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function ReviewStatsSkeleton() {
   return (
     <div className="animate-pulse bg-gray-50 rounded-2xl p-6">

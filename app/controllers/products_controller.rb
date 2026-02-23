@@ -30,7 +30,9 @@ class ProductsController < ApplicationController
   # V3: RSC Streaming — shell streams immediately, heavy data streams as it resolves
   def show_rsc
     @product = find_product
-    @product_data = serialize_product(@product)
+    # Exclude description/features/specs from initial props — they stream via product_details
+    # async prop to keep the initial shell small and prioritize LCP.
+    @product_data = serialize_product(@product).except(:description, :features, :specs)
     stream_view_containing_react_components(template: "products/show_rsc")
   end
 

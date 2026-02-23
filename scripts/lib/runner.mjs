@@ -59,7 +59,7 @@ export async function measurePage(browser, pageConfig, options) {
   });
 
   // Inject performance collectors before navigation
-  await page.evaluateOnNewDocument(getCollectorScript());
+  await page.evaluateOnNewDocument(getCollectorScript(pageConfig.selectors));
 
   if (verbose) {
     console.log(`  Navigating to ${url}`);
@@ -90,8 +90,9 @@ export async function measurePage(browser, pageConfig, options) {
   // Small pause to let event observers settle
   await sleep(200);
 
-  // Click like button for INP measurement
-  const likeBtn = await page.$(SELECTORS.likeButton);
+  // Click button for INP measurement
+  const btnSelector = pageConfig.selectors?.likeButton || SELECTORS.likeButton;
+  const likeBtn = await page.$(btnSelector);
   if (likeBtn) {
     await likeBtn.click();
     await sleep(300); // let event timing observer capture

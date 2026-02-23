@@ -49,6 +49,8 @@ export function ProductImageGallery({ images, productName }: Props) {
           style={isZoomed ? {
             transformOrigin: `${zoomPosition.x}% ${zoomPosition.y}%`
           } : undefined}
+          fetchPriority="high"
+          decoding="async"
         />
 
         {/* Navigation arrows */}
@@ -98,6 +100,7 @@ export function ProductImageGallery({ images, productName }: Props) {
                 src={image.url}
                 alt={image.alt || `${productName} - View ${index + 1}`}
                 className="w-full h-full object-cover"
+                loading="lazy"
               />
             </button>
           ))}

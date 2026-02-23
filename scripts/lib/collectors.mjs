@@ -17,10 +17,10 @@ const webVitalsSource = readFileSync(
  * Uses the web-vitals library for FCP, LCP, CLS, INP, TTFB.
  * Manually handles TBT (longtask), hydration detection, and streaming detection.
  */
-export function getCollectorScript() {
-  const likeSelector = SELECTORS.likeButton;
+export function getCollectorScript(overrides = {}) {
+  const likeSelector = overrides.likeButton || SELECTORS.likeButton;
   const headingSelector = SELECTORS.relatedPostsHeading;
-  const headingText = SELECTORS.relatedPostsText;
+  const headingText = overrides.relatedHeadingText || SELECTORS.relatedPostsText;
 
   return `
     // Inject web-vitals IIFE — creates window.webVitals
