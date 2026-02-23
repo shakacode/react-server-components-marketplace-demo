@@ -3,13 +3,14 @@
 /**
  * Dashboard Benchmarking Script
  *
- * Measures FCP, LCP, TTMC (Time to Meaningful Content), TBT, and TTI
+ * Measures FCP, LCP, TTMC, TTI (hydration), TBT, and simulated INP
  * for each dashboard version (SSR, Client, RSC).
  *
- * TTMC is a custom metric that measures when actual dashboard data appears
- * in the DOM (not just skeleton/loading states). This gives a fair comparison
- * because Client-side rendering shows skeletons immediately (fast FCP) but
- * actual data arrives later after API calls.
+ * Key metrics:
+ * - TTMC: Time to Meaningful Content (when actual data appears, not skeletons)
+ * - TTI:  Time to Interactive (when interactive components are hydrated and respond to clicks)
+ * - INP:  Interaction to Next Paint (measured by simulating clicks on sort/filter buttons)
+ * - TBT:  Total Blocking Time (sum of long task durations > 50ms)
  */
 
 const puppeteer = require('puppeteer');
@@ -30,11 +31,14 @@ async function measurePage(browser, url, label) {
   // Disable cache to simulate first visit
   await page.setCacheEnabled(false);
 
-  // Collect performance entries AND meaningful content timing
+  // Collect performance entries, TTMC, and INP
   await page.evaluateOnNewDocument(() => {
     window.__perfEntries = [];
     window.__lcpEntries = [];
     window.__ttmcTimestamps = {};
+    window.__inpEntries = [];
+    window.__longTasks = [];
+    window.__ttiTimestamp = 0; // When first data-hydrated="true" appears
 
     // Observe paint entries (FCP)
     const paintObs = new PerformanceObserver((list) => {
@@ -56,11 +60,35 @@ async function measurePage(browser, url, label) {
     });
     lcpObs.observe({ type: 'largest-contentful-paint', buffered: true });
 
-    // Track when meaningful content appears using MutationObserver
-    // "Meaningful" = actual data rendered, not skeletons
-    const startTime = performance.now();
+    // Observe long tasks for TBT
+    try {
+      const ltObs = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          window.__longTasks.push({ duration: entry.duration, startTime: entry.startTime });
+        }
+      });
+      ltObs.observe({ type: 'longtask', buffered: true });
+    } catch (e) {}
+
+    // Observe event timing for INP measurement
+    try {
+      const inpObs = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry.duration > 0) {
+            window.__inpEntries.push({
+              duration: entry.duration,
+              processingStart: entry.processingStart,
+              startTime: entry.startTime,
+              name: entry.name,
+            });
+          }
+        }
+      });
+      inpObs.observe({ type: 'event', buffered: true, durationThreshold: 0 });
+    } catch (e) {}
+
+    // Track meaningful content appearance
     const checks = {
-      // KPI cards: look for actual dollar amounts (not skeleton pulse)
       kpi: () => {
         const cards = document.querySelectorAll('.text-2xl, .text-3xl');
         for (const card of cards) {
@@ -68,20 +96,15 @@ async function measurePage(browser, url, label) {
         }
         return false;
       },
-      // Revenue chart: SVG path with actual data points
       chart: () => {
         const paths = document.querySelectorAll('svg path[d]');
         for (const p of paths) {
-          const d = p.getAttribute('d') || '';
-          // Real chart paths have many points (long d attribute)
-          if (d.length > 50) return true;
+          if ((p.getAttribute('d') || '').length > 50) return true;
         }
         return false;
       },
-      // Recent orders table: actual data rows
       table: () => {
-        const rows = document.querySelectorAll('table tbody tr, [class*="order"]');
-        // Need actual content, not skeleton rows
+        const rows = document.querySelectorAll('table tbody tr');
         for (const row of rows) {
           if (row.textContent && row.textContent.includes('#')) return true;
         }
@@ -98,7 +121,6 @@ async function measurePage(browser, url, label) {
       }
     });
 
-    // Start observing once DOM is ready
     if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     } else {
@@ -107,7 +129,6 @@ async function measurePage(browser, url, label) {
       });
     }
 
-    // Also check immediately after initial render and periodically
     const checkAll = () => {
       const now = performance.now();
       for (const [name, check] of Object.entries(checks)) {
@@ -116,16 +137,56 @@ async function measurePage(browser, url, label) {
         }
       }
     };
-
-    // Run check on load and periodically for the first 30s
     window.addEventListener('load', checkAll);
     const interval = setInterval(() => {
       checkAll();
-      // Stop after all found or 30s
+      // Also check for hydration (TTI)
+      if (!window.__ttiTimestamp) {
+        const hydrated = document.querySelector('[data-hydrated="true"]');
+        if (hydrated) window.__ttiTimestamp = Math.round(performance.now());
+      }
       if (Object.keys(window.__ttmcTimestamps).length >= 3 || performance.now() > 30000) {
         clearInterval(interval);
       }
     }, 50);
+
+    // Track TTI via MutationObserver — watches for data-hydrated attribute being set
+    const ttiObs = new MutationObserver((mutations) => {
+      if (window.__ttiTimestamp) return;
+      for (const mutation of mutations) {
+        if (mutation.type === 'attributes' && mutation.attributeName === 'data-hydrated') {
+          const val = mutation.target.getAttribute('data-hydrated');
+          if (val === 'true') {
+            window.__ttiTimestamp = Math.round(performance.now());
+            ttiObs.disconnect();
+            return;
+          }
+        }
+        // Also check subtree for new nodes with data-hydrated
+        if (mutation.type === 'childList') {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType === 1 && node.querySelector) {
+              const h = node.querySelector('[data-hydrated="true"]') || (node.getAttribute && node.getAttribute('data-hydrated') === 'true' ? node : null);
+              if (h) {
+                window.__ttiTimestamp = Math.round(performance.now());
+                ttiObs.disconnect();
+                return;
+              }
+            }
+          }
+        }
+      }
+    });
+    const startTtiObserver = () => {
+      ttiObs.observe(document.body || document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-hydrated'],
+        childList: true,
+        subtree: true,
+      });
+    };
+    if (document.body) startTtiObserver();
+    else document.addEventListener('DOMContentLoaded', startTtiObserver);
   });
 
   const startTime = Date.now();
@@ -133,17 +194,46 @@ async function measurePage(browser, url, label) {
   // Navigate and wait for network idle
   await page.goto(url, { waitUntil: 'networkidle0', timeout: 120000 });
 
-  // Wait for meaningful content to appear (up to 15s)
+  // Wait for meaningful content (up to 15s)
   try {
     await page.waitForFunction(() => {
       return window.__ttmcTimestamps && Object.keys(window.__ttmcTimestamps).length >= 2;
     }, { timeout: 15000 });
-  } catch (e) {
-    // Timeout — some content never appeared
-  }
+  } catch (e) {}
 
-  // Wait a bit more for any deferred rendering
+  // Wait for hydration to complete
   await new Promise(r => setTimeout(r, 500));
+
+  // TTI is captured by the MutationObserver in evaluateOnNewDocument
+  // No additional measurement needed here
+
+  // === Simulated INP ===
+  // Click interactive elements and measure response time
+  const inpResults = [];
+
+  // Try clicking a sort header
+  try {
+    await page.click('[data-sort-header]');
+    await new Promise(r => setTimeout(r, 100));
+    inpResults.push('sort');
+  } catch (e) {}
+
+  // Try clicking a filter button
+  try {
+    await page.click('[data-filter-btn="time"]');
+    await new Promise(r => setTimeout(r, 100));
+    inpResults.push('filter');
+  } catch (e) {}
+
+  // Try clicking a category button
+  try {
+    await page.click('[data-category-btn]');
+    await new Promise(r => setTimeout(r, 100));
+    inpResults.push('category');
+  } catch (e) {}
+
+  // Wait for INP entries to be recorded
+  await new Promise(r => setTimeout(r, 300));
 
   const wallTime = Date.now() - startTime;
 
@@ -153,6 +243,8 @@ async function measurePage(browser, url, label) {
     const paints = window.__perfEntries || [];
     const lcpEntries = window.__lcpEntries || [];
     const ttmc = window.__ttmcTimestamps || {};
+    const inpEntries = window.__inpEntries || [];
+    const longTasks = window.__longTasks || [];
 
     const fcp = paints.find(p => p.name === 'first-contentful-paint')?.startTime || 0;
     const lcp = lcpEntries.length > 0
@@ -161,36 +253,39 @@ async function measurePage(browser, url, label) {
     const lcpElement = lcpEntries.length > 0
       ? lcpEntries[lcpEntries.length - 1].element
       : 'N/A';
-    const lcpSize = lcpEntries.length > 0
-      ? lcpEntries[lcpEntries.length - 1].size
-      : 0;
 
-    // TTMC: time until meaningful content is visible
-    // Use the max of individual content checks (all sections loaded)
+    // TTMC
     const ttmcValues = Object.values(ttmc);
     const ttmcAll = ttmcValues.length > 0 ? Math.max(...ttmcValues) : 0;
     const ttmcFirst = ttmcValues.length > 0 ? Math.min(...ttmcValues) : 0;
 
-    // Total Blocking Time (approximation using Long Tasks)
-    const longTasks = performance.getEntriesByType('longtask') || [];
+    // TBT: sum of (duration - 50ms) for all long tasks
     const tbt = longTasks.reduce((sum, task) => {
       const blocking = task.duration - 50;
       return sum + (blocking > 0 ? blocking : 0);
     }, 0);
 
-    // DOM content loaded
+    // INP: worst interaction duration from event timing
+    const inpDurations = inpEntries
+      .filter(e => e.name === 'pointerup' || e.name === 'click' || e.name === 'keyup')
+      .map(e => e.duration);
+    const worstInp = inpDurations.length > 0 ? Math.max(...inpDurations) : 0;
+    const avgInp = inpDurations.length > 0
+      ? Math.round(inpDurations.reduce((s, d) => s + d, 0) / inpDurations.length)
+      : 0;
+
+    // TTI: time when first interactive element became hydrated (data-hydrated="true")
+    // Captured by MutationObserver during page load
+    const hydratedEl = document.querySelector('[data-hydrated="true"]');
+    let estimatedTTI = window.__ttiTimestamp || 0;
+
     const dcl = nav?.domContentLoadedEventEnd || 0;
     const load = nav?.loadEventEnd || 0;
     const ttfb = nav?.responseStart || 0;
 
-    // Count script elements (JS bundle count)
     const scriptCount = document.querySelectorAll('script[src]').length;
-
-    // Total transferred size (estimate from resource timing)
     const resources = performance.getEntriesByType('resource');
     const jsResources = resources.filter(r => r.name.includes('.js'));
-    const jsSize = jsResources.reduce((sum, r) => sum + (r.transferSize || 0), 0);
-    // Also compute decodedBodySize for uncompressed comparison
     const jsDecodedSize = jsResources.reduce((sum, r) => sum + (r.decodedBodySize || 0), 0);
 
     return {
@@ -198,31 +293,36 @@ async function measurePage(browser, url, label) {
       fcp: Math.round(fcp),
       lcp: Math.round(lcp),
       lcpElement,
-      lcpSize,
       ttmcFirst: Math.round(ttmcFirst),
       ttmcAll: Math.round(ttmcAll),
-      ttmcDetail: ttmc,
+      tti: estimatedTTI,
+      tbt: Math.round(tbt),
+      worstInp: Math.round(worstInp),
+      avgInp,
+      inpCount: inpDurations.length,
       dcl: Math.round(dcl),
       load: Math.round(load),
-      tbt: Math.round(tbt),
       scriptCount,
-      jsTransferKB: Math.round(jsSize / 1024),
       jsDecodedKB: Math.round(jsDecodedSize / 1024),
+      isHydrated: !!hydratedEl,
     };
   });
 
   result.wallTime = wallTime;
+  result.interactionsClicked = inpResults.length;
   await page.close();
   return result;
 }
 
 function median(arr) {
+  if (arr.length === 0) return 0;
   const sorted = [...arr].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 function formatMs(ms) {
+  if (ms === 0) return '—';
   return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
 }
 
@@ -242,7 +342,6 @@ async function main() {
     const url = `${BASE}${path}`;
     console.log(`\n--- ${name} (${path}) ---`);
 
-    // Warmup
     for (let i = 0; i < WARMUP; i++) {
       process.stdout.write(`  Warmup ${i + 1}/${WARMUP}...`);
       try {
@@ -253,14 +352,13 @@ async function main() {
       }
     }
 
-    // Benchmark runs
     const runs = [];
     for (let i = 0; i < RUNS; i++) {
       process.stdout.write(`  Run ${i + 1}/${RUNS}...`);
       try {
         const m = await measurePage(browser, url, `${name}-run-${i}`);
         runs.push(m);
-        console.log(` FCP=${formatMs(m.fcp)} LCP=${formatMs(m.lcp)} TTMC=${formatMs(m.ttmcAll)} TBT=${formatMs(m.tbt)} JS=${m.jsDecodedKB}KB`);
+        console.log(` FCP=${formatMs(m.fcp)} TTMC=${formatMs(m.ttmcAll)} TTI=${formatMs(m.tti)} TBT=${formatMs(m.tbt)} INP=${formatMs(m.worstInp)} JS=${m.jsDecodedKB}KB`);
       } catch (e) {
         console.log(` error: ${e.message}`);
       }
@@ -273,14 +371,17 @@ async function main() {
         lcp: median(runs.map(r => r.lcp)),
         ttmcFirst: median(runs.map(r => r.ttmcFirst)),
         ttmcAll: median(runs.map(r => r.ttmcAll)),
+        tti: median(runs.map(r => r.tti)),
+        tbt: median(runs.map(r => r.tbt)),
+        worstInp: median(runs.map(r => r.worstInp)),
+        avgInp: median(runs.map(r => r.avgInp)),
         dcl: median(runs.map(r => r.dcl)),
         load: median(runs.map(r => r.load)),
-        tbt: median(runs.map(r => r.tbt)),
-        jsTransferKB: median(runs.map(r => r.jsTransferKB)),
         jsDecodedKB: median(runs.map(r => r.jsDecodedKB)),
         scriptCount: runs[0].scriptCount,
         lcpElement: runs[0].lcpElement,
         wallTime: median(runs.map(r => r.wallTime)),
+        isHydrated: runs.every(r => r.isHydrated),
         runs: runs.length,
       };
     }
@@ -289,25 +390,25 @@ async function main() {
   await browser.close();
 
   // Print summary table
-  console.log('\n\n═══════════════════════════════════════════════════════════════════');
-  console.log('                         RESULTS SUMMARY');
-  console.log('═══════════════════════════════════════════════════════════════════\n');
+  console.log('\n\n═════════════════════════════════════════════════════════════════════════');
+  console.log('                            RESULTS SUMMARY');
+  console.log('═════════════════════════════════════════════════════════════════════════\n');
 
-  const metrics = ['ttfb', 'fcp', 'lcp', 'ttmcFirst', 'ttmcAll', 'tbt', 'dcl', 'load', 'jsDecodedKB', 'scriptCount'];
+  const metrics = ['ttfb', 'fcp', 'lcp', 'ttmcFirst', 'ttmcAll', 'tti', 'tbt', 'worstInp', 'avgInp', 'jsDecodedKB', 'scriptCount'];
   const labels = {
     ttfb: 'TTFB',
     fcp: 'FCP',
     lcp: 'LCP',
     ttmcFirst: 'TTMC (1st)',
     ttmcAll: 'TTMC (All)',
+    tti: 'TTI',
     tbt: 'TBT',
-    dcl: 'DCL',
-    load: 'Load',
+    worstInp: 'INP (worst)',
+    avgInp: 'INP (avg)',
     jsDecodedKB: 'JS Size',
     scriptCount: 'Scripts',
   };
 
-  // Header
   const colWidth = 14;
   console.log('Metric'.padEnd(14) + Object.keys(results).map(n => n.padStart(colWidth)).join(''));
   console.log('-'.repeat(14 + Object.keys(results).length * colWidth));
@@ -324,13 +425,14 @@ async function main() {
     console.log(labels[metric].padEnd(14) + row.join(''));
   }
 
-  console.log('\n  TTMC = Time to Meaningful Content (when actual data appears, not skeletons)');
-  console.log('  TTMC (1st) = first data section visible | TTMC (All) = all sections visible');
+  console.log('\n  TTMC = Time to Meaningful Content | TTI = Time to Interactive (hydration complete)');
+  console.log('  INP = Interaction to Next Paint (simulated clicks on sort/filter/category buttons)');
+  console.log('  TBT = Total Blocking Time (long tasks > 50ms)');
 
   // Improvement calculations
   if (results['SSR'] && results['RSC']) {
     console.log('\n--- RSC vs SSR Improvement ---');
-    for (const metric of ['fcp', 'lcp', 'ttmcFirst', 'ttmcAll', 'tbt']) {
+    for (const metric of ['fcp', 'lcp', 'ttmcFirst', 'ttmcAll', 'tti', 'tbt', 'worstInp']) {
       const ssr = results['SSR'][metric];
       const rsc = results['RSC'][metric];
       if (ssr > 0) {
@@ -339,12 +441,11 @@ async function main() {
       }
     }
     console.log(`  JS Size: ${results['SSR'].jsDecodedKB}KB -> ${results['RSC'].jsDecodedKB}KB`);
-    console.log(`  Scripts: ${results['SSR'].scriptCount} -> ${results['RSC'].scriptCount}`);
   }
 
   if (results['Client'] && results['RSC']) {
     console.log('\n--- RSC vs Client Improvement ---');
-    for (const metric of ['fcp', 'lcp', 'ttmcFirst', 'ttmcAll', 'tbt']) {
+    for (const metric of ['fcp', 'lcp', 'ttmcFirst', 'ttmcAll', 'tti', 'tbt', 'worstInp']) {
       const client = results['Client'][metric];
       const rsc = results['RSC'][metric];
       if (client > 0) {
@@ -353,10 +454,9 @@ async function main() {
       }
     }
     console.log(`  JS Size: ${results['Client'].jsDecodedKB}KB -> ${results['RSC'].jsDecodedKB}KB`);
-    console.log(`  Scripts: ${results['Client'].scriptCount} -> ${results['RSC'].scriptCount}`);
   }
 
-  console.log('\n═══════════════════════════════════════════════════════════════════\n');
+  console.log('\n═════════════════════════════════════════════════════════════════════════\n');
 }
 
 main().catch(err => {

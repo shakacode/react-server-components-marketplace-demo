@@ -1,9 +1,9 @@
 'use client';
 
 // Client-side data fetcher — loads all dashboard data via API calls
-// d3 + date-fns are loaded as part of this async chunk
+// d3 + date-fns + interactive components are loaded as part of this async chunk
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type {
   DashboardRestaurant,
   KpiStats,
@@ -17,8 +17,9 @@ import StatCards from './StatCards';
 import RevenueChart from './RevenueChart';
 import OrderStatusChart from './OrderStatusChart';
 import HourlyChart from './HourlyChart';
-import RecentOrdersTable from './RecentOrdersTable';
-import TopMenuItemsChart from './TopMenuItemsChart';
+import DashboardFilters from './DashboardFilters';
+import SortableOrdersTable from './SortableOrdersTable';
+import InteractiveTopItems from './InteractiveTopItems';
 import { StatCardsSkeleton, ChartSkeleton, TableSkeleton, TopItemsSkeleton } from './DashboardSkeletons';
 
 interface Props {
@@ -43,6 +44,8 @@ export default function AsyncDashboardContent({ restaurant }: Props) {
     topItems: null,
     hourlyData: null,
   });
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState('7d');
 
   const fetchData = useCallback(async () => {
     const controller = new AbortController();
@@ -84,8 +87,25 @@ export default function AsyncDashboardContent({ restaurant }: Props) {
     fetchData();
   }, [fetchData]);
 
+  const statuses = useMemo(() => {
+    if (!data.recentOrders) return [];
+    return [...new Set(data.recentOrders.map(o => o.status))].sort();
+  }, [data.recentOrders]);
+
+  const handleStatusFilter = useCallback((status: string | null) => {
+    setStatusFilter(status);
+  }, []);
+
+  const handleTimeRange = useCallback((range: string) => {
+    setTimeRange(range);
+  }, []);
+
   return (
     <div className="space-y-6">
+      {data.recentOrders ? (
+        <DashboardFilters statuses={statuses} onStatusFilter={handleStatusFilter} onTimeRange={handleTimeRange} />
+      ) : null}
+
       {data.kpiStats ? <StatCards stats={data.kpiStats} /> : <StatCardsSkeleton />}
 
       {data.revenueData ? (
@@ -107,9 +127,13 @@ export default function AsyncDashboardContent({ restaurant }: Props) {
         )}
       </div>
 
-      {data.recentOrders ? <RecentOrdersTable orders={data.recentOrders} /> : <TableSkeleton />}
+      {data.recentOrders ? (
+        <SortableOrdersTable orders={data.recentOrders} statusFilter={statusFilter} />
+      ) : (
+        <TableSkeleton />
+      )}
 
-      {data.topItems ? <TopMenuItemsChart items={data.topItems} /> : <TopItemsSkeleton />}
+      {data.topItems ? <InteractiveTopItems items={data.topItems} /> : <TopItemsSkeleton />}
     </div>
   );
 }

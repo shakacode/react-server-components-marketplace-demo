@@ -7,11 +7,12 @@
 //   - d3-scale, d3-shape, d3-array, d3-time-format (~80KB)
 //   - d3-format (~5KB)
 //   - date-fns (~30KB)
-//   - All chart + table component code
+//   - All chart + table + interactive component code
 //
-// Total extra JS: ~115KB+ sent to client for hydration.
+// Total extra JS: ~120KB+ sent to client for hydration.
+// Interactivity (sort, filter) only works after hydration completes.
 
-import React from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import type {
   DashboardRestaurant,
   KpiStats,
@@ -26,8 +27,9 @@ import StatCards from './StatCards';
 import RevenueChart from './RevenueChart';
 import OrderStatusChart from './OrderStatusChart';
 import HourlyChart from './HourlyChart';
-import RecentOrdersTable from './RecentOrdersTable';
-import TopMenuItemsChart from './TopMenuItemsChart';
+import DashboardFilters from './DashboardFilters';
+import SortableOrdersTable from './SortableOrdersTable';
+import InteractiveTopItems from './InteractiveTopItems';
 import { INPOverlay } from '../blog/INPOverlay';
 
 interface Props {
@@ -49,15 +51,32 @@ export default function DashboardPageSSR({
   top_items,
   hourly_data,
 }: Props) {
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState('7d');
+
+  const statuses = useMemo(() => {
+    return [...new Set(recent_orders.map(o => o.status))].sort();
+  }, [recent_orders]);
+
+  const handleStatusFilter = useCallback((status: string | null) => {
+    setStatusFilter(status);
+  }, []);
+
+  const handleTimeRange = useCallback((range: string) => {
+    setTimeRange(range);
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-50/50">
       <div className="container mx-auto max-w-7xl px-4 sm:px-6 py-6">
         {/* Version indicator */}
         <p className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 mb-6">
-          V1: Full SSR — All data fetched server-side before any HTML is sent. d3 + date-fns shipped to client for hydration (~115KB).
+          V1: Full SSR — All data fetched server-side before any HTML is sent. d3 + date-fns + interactive components shipped to client for hydration (~120KB+).
         </p>
 
         <DashboardHeader restaurant={restaurant} />
+
+        <DashboardFilters statuses={statuses} onStatusFilter={handleStatusFilter} onTimeRange={handleTimeRange} />
 
         <div className="mb-6">
           <StatCards stats={kpi_stats} />
@@ -73,11 +92,11 @@ export default function DashboardPageSSR({
         </div>
 
         <div className="mb-6">
-          <RecentOrdersTable orders={recent_orders} />
+          <SortableOrdersTable orders={recent_orders} statusFilter={statusFilter} />
         </div>
 
         <div className="mb-6">
-          <TopMenuItemsChart items={top_items} />
+          <InteractiveTopItems items={top_items} />
         </div>
 
         <INPOverlay />
