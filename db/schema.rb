@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_02_23_101156) do
+ActiveRecord::Schema[7.2].define(version: 2026_02_23_134448) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -49,6 +49,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_02_23_101156) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["menu_item_id"], name: "index_order_lines_on_menu_item_id"
+    t.index ["order_id", "menu_item_id", "quantity", "price_per_unit"], name: "idx_order_lines_order_menu"
     t.index ["order_id"], name: "index_order_lines_on_order_id"
   end
 
@@ -65,6 +66,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_02_23_101156) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["order_number"], name: "index_orders_on_order_number", unique: true
+    t.index ["placed_at", "status"], name: "idx_orders_placed_at_status"
+    t.index ["placed_at"], name: "idx_orders_placed_at"
     t.index ["restaurant_id", "completed_at"], name: "index_orders_on_restaurant_id_and_completed_at"
     t.index ["restaurant_id", "created_at"], name: "index_orders_on_restaurant_id_and_created_at", order: { created_at: :desc }
     t.index ["restaurant_id", "status"], name: "index_orders_on_restaurant_id_and_status"
@@ -104,9 +107,12 @@ ActiveRecord::Schema[7.2].define(version: 2026_02_23_101156) do
     t.boolean "in_stock", default: true
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "tags", default: []
     t.index ["brand"], name: "index_products_on_brand"
     t.index ["category"], name: "index_products_on_category"
+    t.index ["price"], name: "index_products_on_price"
     t.index ["sku"], name: "index_products_on_sku", unique: true
+    t.index ["tags"], name: "index_products_on_tags", using: :gin
   end
 
   create_table "promotions", force: :cascade do |t|

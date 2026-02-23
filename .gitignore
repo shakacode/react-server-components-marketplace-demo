@@ -110,3 +110,9 @@ dump.rdb
 
 # Web Vitals measurement results
 .vitals-results/
+
+# Rails sprocket compiled assets
+/public/assets
+
+# Ad-hoc test/debug scripts
+test-*.js
