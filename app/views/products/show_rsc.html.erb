@@ -1,3 +1,6 @@
+<% content_for :head do %>
+  <link rel="preload" as="image" href="<%= hero_image_url %>" fetchpriority="high">
+<% end %>
 <%= stream_react_component_with_async_props("ProductPageRSC",
     props: { product: @product_data }, prerender: true) do |emit|
 
@@ -13,7 +16,7 @@
   emit.call("review_stats", @product.review_stats)
 
   # Stream customer reviews (complex sort query)
-  reviews = @product.top_reviews(10)
+  reviews = @product.top_reviews(5)
   emit.call("reviews", {
     reviews: reviews.map { |r|
       {
