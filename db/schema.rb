@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_02_10_112154) do
+ActiveRecord::Schema[7.2].define(version: 2026_02_23_101156) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -69,6 +69,44 @@ ActiveRecord::Schema[7.2].define(version: 2026_02_10_112154) do
     t.index ["restaurant_id", "created_at"], name: "index_orders_on_restaurant_id_and_created_at", order: { created_at: :desc }
     t.index ["restaurant_id", "status"], name: "index_orders_on_restaurant_id_and_status"
     t.index ["restaurant_id"], name: "index_orders_on_restaurant_id"
+  end
+
+  create_table "product_reviews", force: :cascade do |t|
+    t.bigint "product_id", null: false
+    t.integer "rating", null: false
+    t.string "title"
+    t.text "comment"
+    t.string "reviewer_name", null: false
+    t.boolean "verified_purchase", default: false
+    t.integer "helpful_count", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["product_id", "created_at"], name: "index_product_reviews_on_product_id_and_created_at"
+    t.index ["product_id", "helpful_count"], name: "index_product_reviews_on_product_id_and_helpful_count"
+    t.index ["product_id", "rating"], name: "index_product_reviews_on_product_id_and_rating"
+    t.index ["product_id"], name: "index_product_reviews_on_product_id"
+  end
+
+  create_table "products", force: :cascade do |t|
+    t.string "name", null: false
+    t.text "description", null: false
+    t.decimal "price", precision: 10, scale: 2, null: false
+    t.decimal "original_price", precision: 10, scale: 2
+    t.string "category", null: false
+    t.string "brand", null: false
+    t.string "sku", null: false
+    t.jsonb "images", default: []
+    t.jsonb "specs", default: {}
+    t.jsonb "features", default: []
+    t.decimal "average_rating", precision: 3, scale: 2, default: "0.0"
+    t.integer "review_count", default: 0
+    t.integer "stock_quantity", default: 100
+    t.boolean "in_stock", default: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["brand"], name: "index_products_on_brand"
+    t.index ["category"], name: "index_products_on_category"
+    t.index ["sku"], name: "index_products_on_sku", unique: true
   end
 
   create_table "promotions", force: :cascade do |t|
@@ -143,6 +181,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_02_10_112154) do
   add_foreign_key "order_lines", "menu_items", on_delete: :restrict
   add_foreign_key "order_lines", "orders", on_delete: :cascade
   add_foreign_key "orders", "restaurants"
+  add_foreign_key "product_reviews", "products"
   add_foreign_key "promotions", "restaurants"
   add_foreign_key "reviews", "restaurants"
   add_foreign_key "special_hours", "restaurants"

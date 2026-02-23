@@ -1,0 +1,11 @@
+<% product_page = react_component_hash(
+  "ProductPageClient",
+  props: { product: @product_data },
+  prerender: true
+) %>
+<% content_for :head do %>
+  <%= product_page["linkTags"] %>
+  <%= product_page["scriptTags"] %>
+  <%= product_page["styleTags"] %>
+<% end %>
+<%= product_page["componentHtml"] %>

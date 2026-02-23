@@ -13,6 +13,7 @@ test:
 
 production:
   <<: *default
-  database: localhub_demo_production
-  username: localhub_demo
-  password: <%= ENV['LOCALHUB_DEMO_DATABASE_PASSWORD'] %>
+  database: <%= ENV.fetch('DATABASE_NAME', 'localhub_demo_production') %>
+  username: <%= ENV['DATABASE_USERNAME'] || ENV['LOCALHUB_DEMO_DATABASE_USERNAME'] || 'localhub_demo' %>
+  password: <%= ENV['DATABASE_PASSWORD'] || ENV['LOCALHUB_DEMO_DATABASE_PASSWORD'] %>
+  host: <%= ENV.fetch('DATABASE_HOST', nil) %>
