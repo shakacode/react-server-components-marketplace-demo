@@ -1,0 +1,9 @@
+<% content_for :head do %>
+  <link rel="preload" as="image" href="<%= hero_image_url %>" fetchpriority="high">
+<% end %>
+<%= react_component("ProductPageSSR", props: {
+  product: @product_data,
+  reviews: @reviews_data,
+  review_stats: @review_stats_data,
+  related_products: @related_products_data
+}, prerender: true) %>

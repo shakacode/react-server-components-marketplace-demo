@@ -1,0 +1,12 @@
+<% product_page = react_component_hash(
+  "ProductPageClient",
+  props: { product: @product_data },
+  prerender: true
+) %>
+<% content_for :head do %>
+  <link rel="preload" as="image" href="<%= hero_image_url %>" fetchpriority="high">
+  <%= product_page["linkTags"] %>
+  <%= product_page["scriptTags"] %>
+  <%= product_page["styleTags"] %>
+<% end %>
+<%= product_page["componentHtml"] %>

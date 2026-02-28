@@ -12,6 +12,11 @@ Rails.application.routes.draw do
   get '/search/client', to: 'restaurants#search_client'  # V2: Loadable components, client-side fetch
   get '/search/rsc', to: 'restaurants#search_rsc'        # V3: RSC streaming
 
+  # Product page routes — three versions demonstrating e-commerce RSC gains
+  get '/product/ssr', to: 'products#show_ssr'        # V1: All data fetched on server, returned at once
+  get '/product/client', to: 'products#show_client'   # V2: Loadable components, client-side fetch
+  get '/product/rsc', to: 'products#show_rsc'         # V3: RSC streaming
+
   # Blog post routes — three versions demonstrating bundle size differences
   get '/blog/ssr', to: 'blog#post_ssr'       # V1: marked + highlight.js shipped to client
   get '/blog/client', to: 'blog#post_client'  # V2: Libraries loaded in async chunk
@@ -40,6 +45,14 @@ Rails.application.routes.draw do
         get :specials
         get :trending
         get :rating
+      end
+    end
+
+    resources :products, only: [] do
+      member do
+        get :reviews
+        get :review_stats
+        get :related_products
       end
     end
 

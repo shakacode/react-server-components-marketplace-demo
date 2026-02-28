@@ -9,6 +9,9 @@ export const PAGES = {
   ssr: { path: '/blog/ssr', label: 'SSR (V1)', hasStreaming: false },
   client: { path: '/blog/client', label: 'Client (V2)', hasStreaming: false },
   rsc: { path: '/blog/rsc', label: 'RSC (V3)', hasStreaming: true },
+  'product-ssr': { path: '/product/ssr', label: 'Product SSR', hasStreaming: false, selectors: { likeButton: 'button', relatedHeadingText: 'Customers Also Viewed' } },
+  'product-client': { path: '/product/client', label: 'Product Client', hasStreaming: false, selectors: { likeButton: 'button', relatedHeadingText: 'Customers Also Viewed' } },
+  'product-rsc': { path: '/product/rsc', label: 'Product RSC', hasStreaming: true, selectors: { likeButton: 'button', relatedHeadingText: 'Customers Also Viewed' } },
 };
 
 export const SELECTORS = {

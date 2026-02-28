@@ -3,6 +3,10 @@ require 'active_support/core_ext/integer/time'
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
 
+  # Enable gzip compression for HTML, JSON, and JS responses.
+  # Critical for RSC streaming — compresses ~135KB HTML to ~25KB over the wire.
+  config.middleware.use Rack::Deflater
+
   # Code is not reloaded between requests.
   config.enable_reloading = false
 

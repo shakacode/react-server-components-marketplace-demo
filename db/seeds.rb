@@ -2,6 +2,7 @@
 mode = ENV.fetch('SEED_MODE', 'small')
 
 require_relative 'seed_scripts/base_seeder'
+require_relative 'seed_scripts/product_seeder'
 
 case mode
 when 'small'
@@ -14,3 +15,7 @@ else
   puts "Unknown SEED_MODE: #{mode}. Use 'small' or 'full'"
   exit 1
 end
+
+# Always seed products (idempotent)
+reviews_count = mode == 'full' ? 100_000 : 50_000
+ProductSeeder.seed!(reviews_per_product: reviews_count)
