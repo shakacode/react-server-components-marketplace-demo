@@ -1,4 +1,6 @@
 class Restaurant < ApplicationRecord
+  include DashboardAnalytics
+
   has_many :hours, dependent: :destroy
   has_many :special_hours, dependent: :destroy
   has_many :reviews, dependent: :destroy

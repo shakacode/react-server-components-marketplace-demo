@@ -76,6 +76,17 @@ const configureClient = () => {
       priority: 10,
       enforce: true,
     },
+    // Isolate d3 charting + date-fns into their own chunk.
+    // Same strategy as markdownLibs: these heavy libraries (d3 ~80KB + date-fns ~30KB)
+    // are only needed for SSR/Client dashboard pages. RSC renders charts server-side
+    // and only ships SVG to the client, so this chunk is never loaded on RSC pages.
+    chartingLibs: {
+      test: /[\\/]node_modules[\\/](d3-scale|d3-shape|d3-array|d3-time-format|d3-time|d3-format|d3-interpolate|d3-color|d3-path|internmap|date-fns)[\\/]/,
+      name: 'charting-libs',
+      chunks: 'all',
+      priority: 10,
+      enforce: true,
+    },
   };
   clientConfig.optimization.splitChunks = splitChunks;
 

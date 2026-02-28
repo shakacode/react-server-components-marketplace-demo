@@ -32,6 +32,11 @@ Rails.application.routes.draw do
   get '/blog/rsc-step4', to: 'blog#post_rsc_step4'
   get '/blog/rsc-step5', to: 'blog#post_rsc_step5'
 
+  # Dashboard analytics routes — three versions demonstrating streaming + chart library gains
+  get '/analytics/ssr', to: 'dashboard_analytics#show_ssr'      # V1: All data fetched on server, returned at once
+  get '/analytics/client', to: 'dashboard_analytics#show_client'  # V2: Loadable components, client-side fetch
+  get '/analytics/rsc', to: 'dashboard_analytics#show_rsc'        # V3: RSC streaming
+
   # Dashboard route (Task 5)
   get '/dashboard', to: 'dashboard#index'
   get '/comparison', to: 'dashboard#comparison'
@@ -54,6 +59,16 @@ Rails.application.routes.draw do
         get :review_stats
         get :related_products
       end
+    end
+
+    # Dashboard analytics API (global — aggregates all restaurants)
+    scope 'dashboard', controller: 'dashboard' do
+      get :kpi_stats
+      get :revenue_data
+      get :order_status
+      get :recent_orders
+      get :top_menu_items
+      get :hourly_distribution
     end
 
     resources :blog_posts, only: [] do
