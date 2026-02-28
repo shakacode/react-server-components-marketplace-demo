@@ -49,6 +49,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_02_23_134448) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["menu_item_id"], name: "index_order_lines_on_menu_item_id"
+    t.index ["order_id", "menu_item_id", "quantity", "price_per_unit"], name: "idx_order_lines_order_menu"
     t.index ["order_id"], name: "index_order_lines_on_order_id"
   end
 
@@ -65,6 +66,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_02_23_134448) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["order_number"], name: "index_orders_on_order_number", unique: true
+    t.index ["placed_at", "status"], name: "idx_orders_placed_at_status"
+    t.index ["placed_at"], name: "idx_orders_placed_at"
     t.index ["restaurant_id", "completed_at"], name: "index_orders_on_restaurant_id_and_completed_at"
     t.index ["restaurant_id", "created_at"], name: "index_orders_on_restaurant_id_and_created_at", order: { created_at: :desc }
     t.index ["restaurant_id", "status"], name: "index_orders_on_restaurant_id_and_status"

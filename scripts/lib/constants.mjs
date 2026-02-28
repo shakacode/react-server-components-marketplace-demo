@@ -15,6 +15,9 @@ export const PAGES = {
   'search-ssr': { path: '/product-search/ssr', label: 'Search SSR', hasStreaming: false },
   'search-client': { path: '/product-search/client', label: 'Search Client', hasStreaming: false },
   'search-rsc': { path: '/product-search/rsc', label: 'Search RSC', hasStreaming: true },
+  'dashboard-ssr': { path: '/analytics/ssr', label: 'Dashboard SSR', hasStreaming: false },
+  'dashboard-client': { path: '/analytics/client', label: 'Dashboard Client', hasStreaming: false },
+  'dashboard-rsc': { path: '/analytics/rsc', label: 'Dashboard RSC', hasStreaming: true },
 };
 
 export const SELECTORS = {

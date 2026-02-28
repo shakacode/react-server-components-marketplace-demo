@@ -38,6 +38,11 @@ class ProductsController < ApplicationController
 
   private
 
+  def hero_image_url
+    @product_data&.dig(:images, 0, "url") || @product_data&.dig(:images, 0, :url)
+  end
+  helper_method :hero_image_url
+
   def find_product
     if params[:id]
       Product.find(params[:id])

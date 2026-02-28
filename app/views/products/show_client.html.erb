@@ -4,6 +4,7 @@
   prerender: true
 ) %>
 <% content_for :head do %>
+  <link rel="preload" as="image" href="<%= hero_image_url %>" fetchpriority="high">
   <%= product_page["linkTags"] %>
   <%= product_page["scriptTags"] %>
   <%= product_page["styleTags"] %>
