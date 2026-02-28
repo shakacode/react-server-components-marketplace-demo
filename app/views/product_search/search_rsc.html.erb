@@ -1,0 +1,53 @@
+<%= stream_react_component_with_async_props("ProductSearchRSC",
+    props: { search_params: @search_params_data }, prerender: true) do |emit|
+
+  # 1. Stream search results FIRST — this is the LCP content.
+  #    Emit products immediately without waiting for review data.
+  products_scope = Product.filtered_search(@search_params_data.symbolize_keys)
+  page = (@search_params_data[:page] || @search_params_data["page"] || 1).to_i
+  per_page = 24
+  total = products_scope.count
+  products = products_scope.offset((page - 1) * per_page).limit(per_page)
+
+  serialized_products = products.map do |p|
+    {
+      id: p.id,
+      name: p.name,
+      description: p.description&.truncate(200),
+      price: p.price.to_f,
+      original_price: p.original_price&.to_f,
+      category: p.category,
+      brand: p.brand,
+      sku: p.sku,
+      images: p.images,
+      features: (p.features || []).first(3),
+      tags: p.tags || [],
+      average_rating: p.average_rating.to_f,
+      review_count: p.review_count,
+      in_stock: p.in_stock,
+      stock_quantity: p.stock_quantity,
+      discount_percentage: p.discount_percentage,
+    }
+  end
+
+  emit.call("search_results", {
+    products: serialized_products,
+    pagination: {
+      current_page: page,
+      total_pages: (total / per_page.to_f).ceil,
+      total_count: total,
+      per_page: per_page,
+    },
+    meta: {
+      query: @search_params_data[:q] || @search_params_data["q"] || '',
+      sort: @search_params_data[:sort] || @search_params_data["sort"] || 'relevance',
+      total_results: total,
+    }
+  })
+
+  # 2. Stream facet counts — expensive aggregation queries
+  base_scope = Product.all
+  q = @search_params_data[:q] || @search_params_data["q"]
+  base_scope = base_scope.search_query(q) if q.present?
+  emit.call("facets", Product.facets(base_scope))
+end %>

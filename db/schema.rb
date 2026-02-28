@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_02_23_101156) do
+ActiveRecord::Schema[7.2].define(version: 2026_02_23_134448) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -104,9 +104,12 @@ ActiveRecord::Schema[7.2].define(version: 2026_02_23_101156) do
     t.boolean "in_stock", default: true
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "tags", default: []
     t.index ["brand"], name: "index_products_on_brand"
     t.index ["category"], name: "index_products_on_category"
+    t.index ["price"], name: "index_products_on_price"
     t.index ["sku"], name: "index_products_on_sku", unique: true
+    t.index ["tags"], name: "index_products_on_tags", using: :gin
   end
 
   create_table "promotions", force: :cascade do |t|

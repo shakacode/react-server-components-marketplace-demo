@@ -12,6 +12,9 @@ export const PAGES = {
   'product-ssr': { path: '/product/ssr', label: 'Product SSR', hasStreaming: false, selectors: { likeButton: 'button', relatedHeadingText: 'Customers Also Viewed' } },
   'product-client': { path: '/product/client', label: 'Product Client', hasStreaming: false, selectors: { likeButton: 'button', relatedHeadingText: 'Customers Also Viewed' } },
   'product-rsc': { path: '/product/rsc', label: 'Product RSC', hasStreaming: true, selectors: { likeButton: 'button', relatedHeadingText: 'Customers Also Viewed' } },
+  'search-ssr': { path: '/product-search/ssr', label: 'Search SSR', hasStreaming: false },
+  'search-client': { path: '/product-search/client', label: 'Search Client', hasStreaming: false },
+  'search-rsc': { path: '/product-search/rsc', label: 'Search RSC', hasStreaming: true },
 };
 
 export const SELECTORS = {

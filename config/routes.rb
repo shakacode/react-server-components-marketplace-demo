@@ -17,6 +17,11 @@ Rails.application.routes.draw do
   get '/product/client', to: 'products#show_client'   # V2: Loadable components, client-side fetch
   get '/product/rsc', to: 'products#show_rsc'         # V3: RSC streaming
 
+  # Product search results — three versions demonstrating search page RSC gains
+  get '/product-search/ssr', to: 'product_search#search_ssr'       # V1: Full SSR
+  get '/product-search/client', to: 'product_search#search_client'  # V2: Client-side search
+  get '/product-search/rsc', to: 'product_search#search_rsc'        # V3: RSC streaming
+
   # Blog post routes — three versions demonstrating bundle size differences
   get '/blog/ssr', to: 'blog#post_ssr'       # V1: marked + highlight.js shipped to client
   get '/blog/client', to: 'blog#post_client'  # V2: Libraries loaded in async chunk
@@ -55,6 +60,11 @@ Rails.application.routes.draw do
         get :related_products
       end
     end
+
+    # Product search API (for V2 client version)
+    get 'product_search/results', to: 'product_search#results'
+    get 'product_search/facets', to: 'product_search#facets'
+    post 'product_search/review_snippets', to: 'product_search#review_snippets'
 
     resources :blog_posts, only: [] do
       member do

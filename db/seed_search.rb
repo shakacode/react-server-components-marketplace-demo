@@ -1,0 +1,2 @@
+require_relative 'seed_scripts/search_product_seeder'
+SearchProductSeeder.seed!

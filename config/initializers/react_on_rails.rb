@@ -15,4 +15,5 @@ ReactOnRails.configure do |config|
 
   # Directory name where components are discovered for auto bundling
   config.components_subdirectory = 'startup'
+
 end
