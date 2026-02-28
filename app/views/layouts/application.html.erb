@@ -12,8 +12,40 @@
   </head>
 
   <body>
+    <script>
+      window.addEventListener('error', function(event) {
+        var err = event.error;
+        if (err) {
+          console.error('[ERROR_DIAG] Message:', err.message);
+          console.error('[ERROR_DIAG] Stack:', err.stack);
+          console.error('[ERROR_DIAG] readyState:', document.readyState);
+          if (err.originalError) {
+            console.error('[ERROR_DIAG] Original error:', err.originalError.message);
+            console.error('[ERROR_DIAG] Original stack:', err.originalError.stack);
+          }
+          // Log loaded scripts for debugging
+          var scripts = document.querySelectorAll('script[src]');
+          var scriptList = [];
+          for (var i = 0; i < scripts.length; i++) {
+            scriptList.push(scripts[i].getAttribute('src'));
+          }
+          console.error('[ERROR_DIAG] Loaded scripts:', scriptList.join(', '));
+          // Also log to a hidden div for curl access
+          var diag = document.createElement('pre');
+          diag.id = 'error-diagnostic';
+          diag.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:red;color:white;padding:10px;z-index:99999;max-height:50vh;overflow:auto;font-size:11px;';
+          diag.textContent = 'ERROR: ' + err.message + '\n\nSTACK: ' + err.stack;
+          if (err.originalError) {
+            diag.textContent += '\n\nORIGINAL: ' + err.originalError.message + '\nORIGINAL STACK: ' + err.originalError.stack;
+          }
+          diag.textContent += '\n\nreadyState: ' + document.readyState;
+          diag.textContent += '\nScripts: ' + scriptList.join(', ');
+          document.body.appendChild(diag);
+        }
+      });
+    </script>
     <%= yield %>
 
-    <%= javascript_pack_tag 'client-bundle' %>
+    <%= javascript_pack_tag 'client-bundle', async: true %>
   </body>
 </html>

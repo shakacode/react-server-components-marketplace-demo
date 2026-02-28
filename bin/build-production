@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== Building production assets ==="
+
+export RAILS_ENV=production
+export NODE_ENV=production
+export SECRET_KEY_BASE="${SECRET_KEY_BASE:-test123}"
+
+# 1. Clean previous build artifacts
+echo "--- Cleaning previous builds ---"
+rm -rf app/javascript/packs/generated
+rm -rf app/javascript/generated
+rm -rf .node-renderer-bundles
+rm -rf public/packs
+
+# 2. Generate auto-bundled packs (react_on_rails auto_load_bundle)
+echo "--- Generating packs ---"
+bundle exec rake react_on_rails:generate_packs
+
+# 2. Compile all webpack bundles (client, server, RSC)
+echo "--- Compiling webpack bundles ---"
+bin/shakapacker
+
+echo "=== Production build complete ==="
