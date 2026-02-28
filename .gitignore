@@ -116,3 +116,6 @@ dump.rdb
 
 # Ad-hoc test/debug scripts
 test-*.js
+
+# MCP configuration
+.mcp.json
